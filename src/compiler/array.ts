@@ -1,11 +1,11 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileList, compileSpreadableListAndJoin, compileSpreadExpression, shouldCompileAsSpreadableList } from ".";
 import { CompilerState } from "../CompilerState";
 import { skipNodesDownwards } from "../utility/general";
 import { getType, isArrayType } from "../utility/type";
 
 export function compileArrayLiteralExpression(state: CompilerState, node: ts.ArrayLiteralExpression) {
-	const elements = node.getElements();
+	const elements = node.elements;
 	if (elements.length === 0) {
 		return "{}";
 	}
@@ -13,8 +13,8 @@ export function compileArrayLiteralExpression(state: CompilerState, node: ts.Arr
 	// optimizations
 	if (elements.length === 1) {
 		const element = elements[0];
-		if (ts.TypeGuards.isSpreadElement(element)) {
-			const exp = skipNodesDownwards(element.getExpression());
+		if (ts.isSpreadElement(element)) {
+			const exp = skipNodesDownwards(element.expression);
 
 			if (!isArrayType(getType(exp))) {
 				return compileSpreadExpression(state, exp);

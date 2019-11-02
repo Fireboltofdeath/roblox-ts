@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { sanitizeTemplate } from ".";
 import { CompilerState } from "../CompilerState";
 
@@ -30,7 +30,7 @@ export function compileNumericLiteral(state: CompilerState, node: ts.NumericLite
 }
 
 export function compileStringLiteral(state: CompilerState, node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral) {
-	if (ts.TypeGuards.isNoSubstitutionTemplateLiteral(node)) {
+	if (ts.isNoSubstitutionTemplateLiteral(node)) {
 		return '"' + sanitizeTemplate(node.getText().slice(1, -1)) + '"';
 	} else {
 		return node.getText();

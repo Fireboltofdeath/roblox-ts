@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	compileExpression,
 	compileLoopBody,
@@ -19,14 +19,14 @@ import { compileTruthyCheck } from "./truthiness";
 
 function isConstantNumberVariableOrLiteral(condValue: ts.Node) {
 	return (
-		ts.TypeGuards.isNumericLiteral(condValue) ||
+		ts.isNumericLiteral(condValue) ||
 		(isNumberType(getType(condValue)) &&
-			ts.TypeGuards.isIdentifier(condValue) &&
+			ts.isIdentifier(condValue) &&
 			condValue.getDefinitions().every(a => {
 				const declNode = a.getDeclarationNode();
-				if (declNode && ts.TypeGuards.isVariableDeclaration(declNode)) {
-					const declParent = declNode.getParent();
-					if (ts.TypeGuards.isVariableDeclarationList(declParent)) {
+				if (declNode && ts.isVariableDeclaration(declNode)) {
+					const declParent = declNode.parent;
+					if (ts.isVariableDeclarationList(declParent)) {
 						return declParent.getDeclarationKind() === ts.VariableDeclarationKind.Const;
 					}
 				}
@@ -42,15 +42,15 @@ function isExpressionConstantNumbers(node: ts.Node): boolean {
 		children.every(
 			child =>
 				isConstantNumberVariableOrLiteral(child) ||
-				child.getKind() === ts.SyntaxKind.PlusToken ||
-				child.getKind() === ts.SyntaxKind.MinusToken ||
-				child.getKind() === ts.SyntaxKind.AsteriskToken ||
-				child.getKind() === ts.SyntaxKind.SlashToken ||
-				child.getKind() === ts.SyntaxKind.AsteriskAsteriskToken ||
-				child.getKind() === ts.SyntaxKind.PercentToken ||
-				(ts.TypeGuards.isPrefixUnaryExpression(child) &&
-					child.getOperatorToken() === ts.SyntaxKind.MinusToken) ||
-				(ts.TypeGuards.isBinaryExpression(child) && isExpressionConstantNumbers(child)),
+				child.kind === ts.SyntaxKind.PlusToken ||
+				child.kind === ts.SyntaxKind.MinusToken ||
+				child.kind === ts.SyntaxKind.AsteriskToken ||
+				child.kind === ts.SyntaxKind.SlashToken ||
+				child.kind === ts.SyntaxKind.AsteriskAsteriskToken ||
+				child.kind === ts.SyntaxKind.PercentToken ||
+				(ts.isPrefixUnaryExpression(child) &&
+					child.operatorToken === ts.SyntaxKind.MinusToken) ||
+				(ts.isBinaryExpression(child) && isExpressionConstantNumbers(child)),
 		)
 	);
 }
@@ -63,21 +63,21 @@ function getSignAndIncrementorForStatement(
 	let forIntervalStr = "";
 	let sign: "" | "+" | "-" = "";
 
-	if (ts.TypeGuards.isBinaryExpression(incrementor)) {
-		// const lhs = skipNodesDownwards(incrementor.getLeft());
-		let rhs = skipNodesDownwards(incrementor.getRight());
-		const operator = skipNodesDownwards(incrementor.getOperatorToken());
+	if (ts.isBinaryExpression(incrementor)) {
+		// const lhs = skipNodesDownwards(incrementor.left);
+		let rhs = skipNodesDownwards(incrementor.right);
+		const operator = skipNodesDownwards(incrementor.operatorToken);
 
 		if (
 			isNumberType(getType(rhs)) &&
-			operator.getKind() === ts.SyntaxKind.EqualsToken &&
-			ts.TypeGuards.isBinaryExpression(rhs)
+			operator.kind === ts.SyntaxKind.EqualsToken &&
+			ts.isBinaryExpression(rhs)
 		) {
-			const rhsLhs = skipNodesDownwards(rhs.getLeft());
-			const rhsOp = skipNodesDownwards(rhs.getOperatorToken());
+			const rhsLhs = skipNodesDownwards(rhs.left);
+			const rhsOp = skipNodesDownwards(rhs.operatorToken);
 
-			if (ts.TypeGuards.isIdentifier(rhsLhs) && isIdentifierWhoseDefinitionMatchesNode(rhsLhs, id)) {
-				switch (rhsOp.getKind()) {
+			if (ts.isIdentifier(rhsLhs) && isIdentifierWhoseDefinitionMatchesNode(rhsLhs, id)) {
+				switch (rhsOp.kind) {
 					case ts.SyntaxKind.MinusToken:
 						sign = "-";
 						break;
@@ -87,7 +87,7 @@ function getSignAndIncrementorForStatement(
 				}
 			}
 		} else {
-			switch (operator.getKind()) {
+			switch (operator.kind) {
 				case ts.SyntaxKind.PlusEqualsToken:
 					sign = "+";
 					break;
@@ -97,8 +97,8 @@ function getSignAndIncrementorForStatement(
 			}
 		}
 
-		if (rhs && ts.TypeGuards.isPrefixUnaryExpression(rhs)) {
-			if (rhs.getOperatorToken() === ts.SyntaxKind.MinusToken) {
+		if (rhs && ts.isPrefixUnaryExpression(rhs)) {
+			if (rhs.operatorToken === ts.SyntaxKind.MinusToken) {
 				switch (sign) {
 					case "+":
 						sign = "-";
@@ -109,14 +109,14 @@ function getSignAndIncrementorForStatement(
 					case "":
 						return ["", ""];
 				}
-				rhs = rhs.getOperand();
+				rhs = rhs.operand;
 			}
 		}
 
-		if (ts.TypeGuards.isNumericLiteral(rhs)) {
+		if (ts.isNumericLiteral(rhs)) {
 			forIntervalStr = compileExpression(state, rhs);
 		}
-	} else if (incrementor.getOperatorToken() === ts.SyntaxKind.MinusMinusToken) {
+	} else if (incrementor.operator === ts.SyntaxKind.MinusMinusToken) {
 		forIntervalStr = "1";
 		sign = "-";
 	} else {
@@ -128,23 +128,23 @@ function getSignAndIncrementorForStatement(
 
 function getLimitInForStatement(
 	state: CompilerState,
-	condition: ts.Expression<ts.ts.Expression>,
+	condition: ts.Expression,
 	id: ts.Identifier,
-): [string, ts.Node<ts.ts.Node> | undefined] {
-	if (ts.TypeGuards.isBinaryExpression(condition)) {
-		const lhs = skipNodesDownwards(condition.getLeft());
-		const operator = condition.getOperatorToken();
-		const rhs = skipNodesDownwards(condition.getRight());
+): [string, ts.Node | undefined] {
+	if (ts.isBinaryExpression(condition)) {
+		const lhs = skipNodesDownwards(condition.left);
+		const operator = condition.operatorToken;
+		const rhs = skipNodesDownwards(condition.right);
 
 		if (isIdentifierWhoseDefinitionMatchesNode(lhs, id)) {
-			switch (operator.getKind()) {
+			switch (operator.kind) {
 				case ts.SyntaxKind.GreaterThanEqualsToken: // >=
 					return [">=", rhs];
 				case ts.SyntaxKind.LessThanEqualsToken: // <=
 					return ["<=", rhs];
 			}
 		} else if (isIdentifierWhoseDefinitionMatchesNode(rhs, id)) {
-			switch (operator.getKind()) {
+			switch (operator.kind) {
 				case ts.SyntaxKind.GreaterThanEqualsToken: // >=
 					return ["<=", lhs];
 				case ts.SyntaxKind.LessThanEqualsToken: // <=
@@ -157,7 +157,7 @@ function getLimitInForStatement(
 
 function safelyHandleExpressionsInForStatement(
 	state: CompilerState,
-	incrementor: ts.Expression<ts.ts.Expression>,
+	incrementor: ts.Expression<ts.Expression>,
 	incrementorStr: string,
 	context: PrecedingStatementContext,
 	indentation: number,
@@ -175,7 +175,7 @@ function getSimpleForLoopString(
 	state: CompilerState,
 	initializer: ts.VariableDeclarationList,
 	forLoopVars: string,
-	statement: ts.Statement<ts.ts.Statement>,
+	statement: ts.Statement<ts.Statement>,
 ) {
 	let result = "";
 	state.popIndent();
@@ -194,15 +194,15 @@ function getSimpleForLoopString(
 
 export function compileForStatement(state: CompilerState, node: ts.ForStatement) {
 	state.pushIdStack();
-	const statement = node.getStatement();
-	const condition = skipNodesDownwards(node.getCondition());
+	const statement = node.statement;
+	const condition = skipNodesDownwards(node.condition);
 	const incrementor = skipNodesDownwards(node.getIncrementor());
 
 	const localizations = new Array<string>();
 	const cleanups = new Array<() => void>();
 	let result = state.indent + "do\n";
 	state.pushIndent();
-	const initializer = skipNodesDownwards(node.getInitializer());
+	const initializer = skipNodesDownwards(node.initializer);
 	let conditionStr: string | undefined;
 	let incrementorStr: string | undefined;
 
@@ -211,17 +211,17 @@ export function compileForStatement(state: CompilerState, node: ts.ForStatement)
 	let initializerContext: PrecedingStatementContext | undefined;
 
 	if (initializer) {
-		if (ts.TypeGuards.isVariableDeclarationList(initializer)) {
+		if (ts.isVariableDeclarationList(initializer)) {
 			const declarations = initializer.getDeclarations();
 			const statementDescendants = statement.getDescendants();
 			if (initializer.getDeclarationKind() === ts.VariableDeclarationKind.Let) {
 				if (declarations.length === 1) {
 					const [declaration] = declarations;
-					const lhs = skipNodesDownwards(declaration.getNameNode());
-					const rhs = skipNodesDownwards(declaration.getInitializer());
+					const lhs = skipNodesDownwards(declaration.name);
+					const rhs = skipNodesDownwards(declaration.initializer);
 
 					if (
-						ts.TypeGuards.isIdentifier(lhs) &&
+						ts.isIdentifier(lhs) &&
 						!statementDescendants.some(statementDescendant =>
 							expressionModifiesVariable(statementDescendant, lhs),
 						) &&
@@ -251,7 +251,7 @@ export function compileForStatement(state: CompilerState, node: ts.ForStatement)
 									// numeric literals, or constant number identifiers are safe
 									if (
 										condValue &&
-										ts.TypeGuards.isExpression(condValue) &&
+										ts.isExpression(condValue) &&
 										(isConstantNumberVariableOrLiteral(condValue) ||
 											isExpressionConstantNumbers(condValue))
 									) {
@@ -265,7 +265,7 @@ export function compileForStatement(state: CompilerState, node: ts.ForStatement)
 												state,
 												initializer,
 												compileExpression(state, condValue) +
-													(incrStr === "1" ? "" : ", " + incrStr),
+												(incrStr === "1" ? "" : ", " + incrStr),
 												statement,
 											);
 										}
@@ -296,7 +296,7 @@ export function compileForStatement(state: CompilerState, node: ts.ForStatement)
 				declarations.forEach(declaration => {
 					const lhs = declaration.getChildAtIndex(0);
 
-					if (ts.TypeGuards.isIdentifier(lhs)) {
+					if (ts.isIdentifier(lhs)) {
 						const name = lhs.getText();
 						const isLoopVarModified = statementDescendants.some(statementDescendant =>
 							expressionModifiesVariable(statementDescendant, lhs),
@@ -325,7 +325,7 @@ export function compileForStatement(state: CompilerState, node: ts.ForStatement)
 					}
 				});
 			}
-		} else if (ts.TypeGuards.isExpression(initializer)) {
+		} else if (ts.isExpression(initializer)) {
 			state.enterPrecedingStatementContext();
 			const expStr = compileExpression(state, initializer);
 			initializerContext = state.exitPrecedingStatementContext();

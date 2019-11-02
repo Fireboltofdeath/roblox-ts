@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -29,37 +29,37 @@ import { isValidLuaIdentifier } from "./security";
 export function isExpInTruthyCheck(node: ts.Node) {
 	const previous =
 		node.getParentWhile((p, n) => {
-			if (ts.TypeGuards.isParenthesizedExpression(p) || ts.TypeGuards.isNonNullExpression(p)) {
+			if (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p)) {
 				return true;
-			} else if (ts.TypeGuards.isBinaryExpression(p)) {
-				const opKind = p.getOperatorToken().getKind();
+			} else if (ts.isBinaryExpression(p)) {
+				const opKind = p.operatorToken.kind;
 				return opKind === ts.SyntaxKind.AmpersandAmpersandToken || opKind === ts.SyntaxKind.BarBarToken;
-			} else if (ts.TypeGuards.isConditionalExpression(p) && (p.getWhenTrue() === n || p.getWhenFalse() === n)) {
+			} else if (ts.isConditionalExpression(p) && (p.whenTrue === n || p.whenFalse === n)) {
 				return true;
 			} else {
 				return false;
 			}
 		}) || node;
 
-	const top = previous.getParent();
+	const top = previous.parent;
 
 	if (top) {
 		if (
-			(ts.TypeGuards.isConditionalExpression(top) || ts.TypeGuards.isForStatement(top)) &&
-			top.getCondition() === previous
+			(ts.isConditionalExpression(top) || ts.isForStatement(top)) &&
+			top.condition === previous
 		) {
 			return true;
 		} else if (
-			ts.TypeGuards.isPrefixUnaryExpression(top) &&
-			top.getOperatorToken() === ts.SyntaxKind.ExclamationToken &&
-			top.getOperand() === previous
+			ts.isPrefixUnaryExpression(top) &&
+			top.operatorToken === ts.SyntaxKind.ExclamationToken &&
+			top.operand === previous
 		) {
 			return true;
 		} else if (
-			(ts.TypeGuards.isIfStatement(top) ||
-				ts.TypeGuards.isWhileStatement(top) ||
-				ts.TypeGuards.isDoStatement(top)) &&
-			top.getExpression() === previous
+			(ts.isIfStatement(top) ||
+				ts.isWhileStatement(top) ||
+				ts.isDoStatement(top)) &&
+			top.expression === previous
 		) {
 			return true;
 		}
@@ -139,7 +139,7 @@ export function compileLogicalBinary(
 	state.pushPrecedingStatements(
 		lhs,
 		state.indent +
-			`if ${isAnd ? "" : "not ("}${removeBalancedParenthesisFromStringBorders(lhsStr)}${isAnd ? "" : ")"} then\n`,
+		`if ${isAnd ? "" : "not ("}${removeBalancedParenthesisFromStringBorders(lhsStr)}${isAnd ? "" : ")"} then\n`,
 	);
 
 	if (expStr !== rhsStr) {
@@ -223,11 +223,11 @@ export function compileTruthyCheck(
 			exp.getNonWhitespaceStart() - exp.getStartLinePos(),
 			yellow("Compiler Warning:"),
 			"`" +
-				exp.getText() +
-				"` will be checked against " +
-				[checkNon0 ? "0" : undefined, checkNaN ? "NaN" : undefined, checkEmptyString ? `""` : undefined]
-					.filter(a => a !== undefined)
-					.join(", "),
+			exp.getText() +
+			"` will be checked against " +
+			[checkNon0 ? "0" : undefined, checkNaN ? "NaN" : undefined, checkEmptyString ? `""` : undefined]
+				.filter(a => a !== undefined)
+				.join(", "),
 		);
 	}
 

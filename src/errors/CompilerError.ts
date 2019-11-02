@@ -1,5 +1,5 @@
 import path from "path";
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { addEvent } from "../analytics";
 import { red } from "../utility/text";
 import { LoggableError } from "./LoggableError";
@@ -108,14 +108,14 @@ export class CompilerError extends LoggableError {
 	) {
 		super(
 			message +
-				(shouldNotHappen ? "\nPlease submit an issue at https://github.com/roblox-ts/roblox-ts/issues" : ""),
+			(shouldNotHappen ? "\nPlease submit an issue at https://github.com/roblox-ts/roblox-ts/issues" : ""),
 		);
 		void addEvent("CompilerError", CompilerErrorType[type]);
 	}
 
 	public log(projectPath: string) {
 		const node = this.node;
-		if (ts.TypeGuards.isSourceFile(node)) {
+		if (ts.isSourceFile(node)) {
 			console.log(
 				"%s - %s %s",
 				path.relative(projectPath, this.node.getSourceFile().getFilePath()),

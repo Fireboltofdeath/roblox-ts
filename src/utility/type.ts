@@ -1,7 +1,8 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { CompilerDirective, getCompilerDirective, isIdentifierDefinedInConst } from "../compiler";
 import { PrecedingStatementContext } from "../CompilerState";
 import { skipNodesDownwards, skipNodesUpwardsLookAhead } from "./general";
+import { getAncestors, isConstEnum, isThisExpression, isSuperExpression, isTupleType, isArrayType } from "./ast";
 
 const RBX_SERVICES = new Set([
 	"AssetService",
@@ -55,12 +56,12 @@ export function isRbxService(name: string) {
 export function isTypeStatement(node: ts.Node) {
 	return (
 		// Classes which implement
-		(ts.TypeGuards.isHeritageClause(node) && node.getToken() === ts.SyntaxKind.ImplementsKeyword) ||
-		ts.TypeGuards.isEmptyStatement(node) ||
-		ts.TypeGuards.isTypeReferenceNode(node) ||
-		ts.TypeGuards.isTypeAliasDeclaration(node) ||
-		ts.TypeGuards.isInterfaceDeclaration(node) ||
-		(ts.TypeGuards.isEnumDeclaration(node) && node.isConstEnum())
+		(ts.isHeritageClause(node) && node.token === ts.SyntaxKind.ImplementsKeyword) ||
+		ts.isEmptyStatement(node) ||
+		ts.isTypeReferenceNode(node) ||
+		ts.isTypeAliasDeclaration(node) ||
+		ts.isInterfaceDeclaration(node) ||
+		(ts.isEnumDeclaration(node) && isConstEnum(node))
 	);
 }
 
@@ -71,17 +72,9 @@ export function isTypeStatement(node: ts.Node) {
 function isType(node: ts.Node) {
 	return (
 		isTypeStatement(node) ||
-		node
-			.getAncestors()
-			.some(ancestor => ancestor.getKind() === ts.SyntaxKind.TypeQuery || isTypeStatement(ancestor)) ||
+		getAncestors(node).some(ancestor => ancestor.kind === ts.SyntaxKind.TypeQuery || isTypeStatement(ancestor)) ||
 		// if it is a const enum, it is always a type, even if it isn't a type >:)
-		(ts.TypeGuards.isIdentifier(node) &&
-			node.getDefinitions().some(def =>
-				def
-					.getNode()
-					.getAncestors()
-					.some(ancestor => ts.TypeGuards.isEnumDeclaration(ancestor) && ancestor.isConstEnum()),
-			))
+		(ts.isIdentifier(node) && node.getDefinitions().some(def => getAncestors(def.getNode()).some(ancestor => ts.isEnumDeclaration(ancestor) && isConstEnum(ancestor))))
 	);
 }
 
@@ -98,16 +91,16 @@ export function isUsedExclusivelyAsType(node: ts.Identifier) {
 					if (!isInImportStatement) {
 						const isInExportStatement = ref.getFirstAncestor(
 							ancestor =>
-								ts.TypeGuards.isExportAssignment(ancestor) ||
-								ts.TypeGuards.isExportDeclaration(ancestor),
+								ts.isExportAssignment(ancestor) ||
+								ts.isExportDeclaration(ancestor),
 						);
 
 						// If it is in an export statement, then it does count, but only if there is a value-version of the identifier.
 						// Otherwise, if the ref is a non-type, then it counts
 						if (
 							isInExportStatement
-								? ts.TypeGuards.isIdentifier(ref) &&
-								  ref.getDefinitions().some(def => !isType(def.getNode()))
+								? ts.isIdentifier(ref) &&
+								ref.getDefinitions().some(def => !isType(def.getNode()))
 								: !isType(ref)
 						) {
 							return false;
@@ -126,17 +119,19 @@ export function isUsedExclusivelyAsType(node: ts.Identifier) {
 export function inheritsFrom(type: ts.Type, className: string): boolean {
 	const symbol = type.getSymbol();
 	if (symbol) {
-		if (symbol.getName() === className) {
+		if (symbol.name === className) {
 			return true;
 		}
 		const declarations = symbol.getDeclarations();
-		for (const declaration of declarations) {
-			if (!ts.TypeGuards.isSourceFile(declaration)) {
-				const decType = getType(declaration);
-				const decBaseTypes = decType.getBaseTypes();
-				for (const baseType of decBaseTypes) {
-					if (inheritsFrom(baseType, className)) {
-						return true;
+		if (declarations) {
+			for (const declaration of declarations) {
+				if (!ts.isSourceFile(declaration)) {
+					const decType = getType(declaration);
+					const decBaseTypes = decType.getBaseTypes();
+					for (const baseType of decBaseTypes) {
+						if (inheritsFrom(baseType, className)) {
+							return true;
+						}
 					}
 				}
 			}
@@ -145,15 +140,15 @@ export function inheritsFrom(type: ts.Type, className: string): boolean {
 	return false;
 }
 
-export function isTypeOnlyNamespace(node: ts.NamespaceDeclaration) {
-	const statements = node.getStatements();
+export function isTypeOnlyNamespace(node: ts.ModuleDeclaration) {
+	const statements = node.statements;
 	for (const statement of statements) {
-		if (!ts.TypeGuards.isNamespaceDeclaration(statement) && !isType(statement)) {
+		if (!ts.isModuleDeclaration(statement) && !isType(statement)) {
 			return false;
 		}
 	}
 	for (const statement of statements) {
-		if (ts.TypeGuards.isNamespaceDeclaration(statement) && !isTypeOnlyNamespace(statement)) {
+		if (ts.isModuleDeclaration(statement) && !isTypeOnlyNamespace(statement)) {
 			return false;
 		}
 	}
@@ -271,7 +266,7 @@ export function isObjectType(type: ts.Type) {
 export function isEnumType(type: ts.Type) {
 	return isSomeType(type, typeConstraint, t => {
 		const symbol = t.getSymbol();
-		return symbol !== undefined && symbol.getDeclarations().some(d => ts.TypeGuards.isEnumDeclaration(d));
+		return symbol !== undefined && symbol.getDeclarations().some(d => ts.isEnumDeclaration(d));
 	});
 }
 
@@ -315,7 +310,7 @@ function getCompilerDirectiveHelper(
 }
 
 function getCompilerDirectiveWithSomeConstraint(
-	someTypeConstraint: (type: ts.Type<ts.ts.Type>, cb: (type: ts.Type<ts.ts.Type>) => boolean) => boolean,
+	someTypeConstraint: (type: ts.Type<ts.Type>, cb: (type: ts.Type<ts.Type>) => boolean) => boolean,
 	type: ts.Type,
 	directive: CompilerDirective,
 	orCallback = (t: ts.Type) => false,
@@ -376,7 +371,7 @@ export function superExpressionClassInheritsFromArray(node: ts.Expression, recur
 			getCompilerDirectiveWithConstraint(
 				constructSignature.getReturnType(),
 				CompilerDirective.Array,
-				t => t.isArray() || t.isTuple(),
+				t => isArrayType(t) || isTupleType(t),
 			)
 		) {
 			return true;
@@ -391,7 +386,7 @@ export function classDeclarationInheritsFromArray(
 	recursive = true,
 ) {
 	const extendsExp = classExp.getExtends();
-	return extendsExp ? superExpressionClassInheritsFromArray(extendsExp.getExpression(), recursive) : false;
+	return extendsExp ? superExpressionClassInheritsFromArray(extendsExp.expression, recursive) : false;
 }
 
 function inheritsFromArray(type: ts.Type) {
@@ -399,7 +394,7 @@ function inheritsFromArray(type: ts.Type) {
 
 	if (symbol) {
 		for (const declaration of symbol.getDeclarations()) {
-			if (ts.TypeGuards.isClassDeclaration(declaration) && classDeclarationInheritsFromArray(declaration)) {
+			if (ts.isClassDeclaration(declaration) && classDeclarationInheritsFromArray(declaration)) {
 				return true;
 			}
 		}
@@ -412,7 +407,7 @@ export function isArrayTypeLax(type: ts.Type) {
 	return getCompilerDirectiveWithLaxConstraint(
 		type,
 		CompilerDirective.Array,
-		t => t.isArray() || t.isTuple() || inheritsFromArray(type),
+		t => isArrayType(t) || isTupleType(t) || inheritsFromArray(type),
 	);
 }
 
@@ -420,7 +415,7 @@ export function isArrayType(type: ts.Type) {
 	return getCompilerDirectiveWithConstraint(
 		type,
 		CompilerDirective.Array,
-		t => t.isArray() || t.isTuple() || inheritsFromArray(type),
+		t => isArrayType(t) || isTupleType(t) || inheritsFromArray(type),
 	);
 }
 
@@ -464,16 +459,16 @@ export function isTupleReturnType(node: ts.ReturnTypedNode) {
 }
 
 export function isTupleReturnTypeCall(node: ts.CallExpression) {
-	const expr = node.getExpression();
+	const expr = node.expression;
 
-	if (ts.TypeGuards.isIdentifier(expr)) {
+	if (ts.isIdentifier(expr)) {
 		const definitions = expr.getDefinitions();
 		if (
 			// I don't think a case like this could ever occur, but I also don't want to be blamed if it does.
 			definitions.length > 0 &&
 			definitions.every(def => {
 				const declarationNode = def.getDeclarationNode();
-				return declarationNode && ts.TypeGuards.isFunctionDeclaration(declarationNode)
+				return declarationNode && ts.isFunctionDeclaration(declarationNode)
 					? isTupleReturnType(declarationNode)
 					: false;
 			})
@@ -485,15 +480,15 @@ export function isTupleReturnTypeCall(node: ts.CallExpression) {
 	const symbol = expr.getSymbol();
 
 	if (symbol) {
-		const valDec = symbol.getValueDeclaration();
-		return valDec && ts.TypeGuards.isReturnTypedNode(valDec) ? isTupleReturnType(valDec) : false;
+		const valDec = symbol.valueDeclaration;
+		return valDec && ts.isReturnTypedNode(valDec) ? isTupleReturnType(valDec) : false;
 	} else {
 		return false;
 	}
 }
 
 export function shouldHoist(ancestor: ts.Node, id: ts.Identifier, checkAncestor = true): boolean {
-	if (ts.TypeGuards.isForStatement(ancestor)) {
+	if (ts.isForStatement(ancestor)) {
 		return false;
 	}
 
@@ -502,15 +497,15 @@ export function shouldHoist(ancestor: ts.Node, id: ts.Identifier, checkAncestor 
 		for (const refEntry of refSymbol.getReferences()) {
 			if (refEntry.getSourceFile() === id.getSourceFile()) {
 				let refNode = refEntry.getNode();
-				if (ts.TypeGuards.isVariableDeclaration(refNode)) {
-					refNode = refNode.getNameNode();
+				if (ts.isVariableDeclaration(refNode)) {
+					refNode = refNode.name;
 				}
 				refs.push(refNode);
 			}
 		}
 	}
 
-	const ancestorParent = ancestor.getParent();
+	const ancestorParent = ancestor.parent;
 	const ancestorChildIndex = ancestor.getChildIndex();
 
 	const checkCallback = (ref: ts.Node) => {
@@ -523,8 +518,8 @@ export function shouldHoist(ancestor: ts.Node, id: ts.Identifier, checkAncestor 
 			return false;
 		} else {
 			let refAncestor: ts.Node | undefined = ref;
-			while (refAncestor && refAncestor.getParent() !== ancestorParent) {
-				refAncestor = refAncestor.getParent();
+			while (refAncestor && refAncestor.parent !== ancestorParent) {
+				refAncestor = refAncestor.parent;
 			}
 			if (refAncestor && refAncestor.getChildIndex() >= ancestorChildIndex) {
 				return true;
@@ -562,30 +557,30 @@ export function shouldPushToPrecedingStatement(
  */
 export function isConstantExpression(node: ts.Expression, maxDepth: number = Number.MAX_VALUE): boolean {
 	if (maxDepth >= 0) {
-		if (ts.TypeGuards.isStringLiteral(node)) {
+		if (ts.isStringLiteral(node)) {
 			return true;
-		} else if (ts.TypeGuards.isNumericLiteral(node)) {
+		} else if (ts.isNumericLiteral(node)) {
 			return true;
-		} else if (ts.TypeGuards.isIdentifier(node) && isIdentifierDefinedInConst(node)) {
+		} else if (ts.isIdentifier(node) && isIdentifierDefinedInConst(node)) {
 			return true;
-		} else if (ts.TypeGuards.isThisExpression(node) || ts.TypeGuards.isSuperExpression(node)) {
+		} else if (isThisExpression(node) || isSuperExpression(node)) {
 			return true;
 		} else if (
-			ts.TypeGuards.isBinaryExpression(node) &&
-			isConstantExpression(skipNodesDownwards(node.getLeft()), maxDepth - 1) &&
-			isConstantExpression(skipNodesDownwards(node.getRight()), maxDepth - 1)
+			ts.isBinaryExpression(node) &&
+			isConstantExpression(skipNodesDownwards(node.left), maxDepth - 1) &&
+			isConstantExpression(skipNodesDownwards(node.right), maxDepth - 1)
 		) {
 			return true;
 		} else if (
-			(ts.TypeGuards.isPrefixUnaryExpression(node) || ts.TypeGuards.isPostfixUnaryExpression(node)) &&
-			isConstantExpression(skipNodesDownwards(node.getOperand()), maxDepth)
+			(ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+			isConstantExpression(skipNodesDownwards(node.operand), maxDepth)
 		) {
 			return true;
 		} else if (
-			ts.TypeGuards.isConditionalExpression(node) &&
-			isConstantExpression(skipNodesDownwards(node.getCondition()), maxDepth - 1) &&
-			isConstantExpression(skipNodesDownwards(node.getWhenTrue()), maxDepth - 1) &&
-			isConstantExpression(skipNodesDownwards(node.getWhenFalse()), maxDepth - 1)
+			ts.isConditionalExpression(node) &&
+			isConstantExpression(skipNodesDownwards(node.condition), maxDepth - 1) &&
+			isConstantExpression(skipNodesDownwards(node.whenTrue), maxDepth - 1) &&
+			isConstantExpression(skipNodesDownwards(node.whenFalse), maxDepth - 1)
 		) {
 			return true;
 		}

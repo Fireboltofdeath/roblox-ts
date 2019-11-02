@@ -1,16 +1,17 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { checkReserved, getReadableExpressionName, sanitizeTemplate } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { safeLuaIndex, skipNodesDownwards } from "../utility/general";
 import { shouldHoist } from "../utility/type";
+import { getName, isConstEnum } from "../utility/ast";
 
 export function compileEnumDeclaration(state: CompilerState, node: ts.EnumDeclaration) {
 	let result = "";
-	if (node.isConstEnum()) {
+	if (isConstEnum(node)) {
 		return result;
 	}
-	const nameNode = node.getNameNode();
+	const nameNode = node.name;
 
 	if (nameNode.getDefinitionNodes().some(definition => definition !== node)) {
 		throw new CompilerError("Enum merging is not allowed!", node, CompilerErrorType.NoEnumMerging);
@@ -28,8 +29,8 @@ export function compileEnumDeclaration(state: CompilerState, node: ts.EnumDeclar
 	const inverseId = state.getNewId();
 	result += state.indent + `local ${inverseId} = {};\n`;
 	result += state.indent + `${name} = setmetatable({}, { __index = ${inverseId} });\n`;
-	for (const member of node.getMembers()) {
-		const memberName = member.getName();
+	for (const member of node.members) {
+		const memberName = getName(member);
 		const memberValue = member.getValue();
 		const safeIndex = safeLuaIndex(name, memberName);
 		if (typeof memberValue === "string") {
@@ -38,7 +39,7 @@ export function compileEnumDeclaration(state: CompilerState, node: ts.EnumDeclar
 		} else if (typeof memberValue === "number") {
 			result += state.indent + `${safeIndex} = ${memberValue};\n`;
 			result += state.indent + `${inverseId}[${memberValue}] = "${memberName}";\n`;
-		} else if (member.hasInitializer()) {
+		} else if (member.initializer !== undefined) {
 			const initializer = skipNodesDownwards(member.getInitializerOrThrow());
 			state.enterPrecedingStatementContext();
 			const expStr = getReadableExpressionName(state, initializer);

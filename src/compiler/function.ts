@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	checkReserved,
 	checkReturnsNonAny,
@@ -14,6 +14,7 @@ import { skipNodesDownwards, skipNodesUpwards } from "../utility/general";
 import { classDeclarationInheritsFromArray, getType, isGeneratorType, isTupleType, shouldHoist } from "../utility/type";
 import { isDefinedAsMethod } from "./call";
 import { isValidLuaIdentifier } from "./security";
+import { getKindName, isSuperExpression } from "../utility/ast";
 
 export type HasParameters =
 	| ts.FunctionExpression
@@ -23,21 +24,21 @@ export type HasParameters =
 	| ts.MethodDeclaration;
 
 export const nodeHasParameters = (ancestor: ts.Node): ancestor is HasParameters =>
-	ts.TypeGuards.isFunctionExpression(ancestor) ||
-	ts.TypeGuards.isArrowFunction(ancestor) ||
-	ts.TypeGuards.isFunctionDeclaration(ancestor) ||
-	ts.TypeGuards.isConstructorDeclaration(ancestor) ||
-	ts.TypeGuards.isMethodDeclaration(ancestor);
+	ts.isFunctionExpression(ancestor) ||
+	ts.isArrowFunction(ancestor) ||
+	ts.isFunctionDeclaration(ancestor) ||
+	ts.isConstructorDeclaration(ancestor) ||
+	ts.isMethodDeclaration(ancestor);
 
 function getReturnStrFromExpression(state: CompilerState, exp: ts.Expression, func?: HasParameters) {
 	exp = skipNodesDownwards(exp);
 
 	if (func && isTupleType(func.getReturnType())) {
-		if (ts.TypeGuards.isArrayLiteralExpression(exp)) {
+		if (ts.isArrayLiteralExpression(exp)) {
 			let expStr = compileExpression(state, exp);
 			expStr = expStr.substr(2, expStr.length - 4);
 			return `return ${expStr};`;
-		} else if (ts.TypeGuards.isCallExpression(exp) && isTupleType(exp.getReturnType())) {
+		} else if (ts.isCallExpression(exp) && isTupleType(exp.getReturnType())) {
 			const expStr = compileCallExpression(state, exp, true);
 			return `return ${expStr};`;
 		} else {
@@ -56,7 +57,7 @@ function getReturnStrFromExpression(state: CompilerState, exp: ts.Expression, fu
 }
 
 export function compileReturnStatement(state: CompilerState, node: ts.ReturnStatement) {
-	const exp = skipNodesDownwards(node.getExpression());
+	const exp = skipNodesDownwards(node.expression);
 	if (exp) {
 		state.enterPrecedingStatementContext();
 		const funcNode = node.getFirstAncestor(nodeHasParameters);
@@ -68,20 +69,20 @@ export function compileReturnStatement(state: CompilerState, node: ts.ReturnStat
 }
 
 export function isFunctionExpressionMethod(node: ts.FunctionExpression) {
-	const parent = skipNodesUpwards(node.getParent());
-	return ts.TypeGuards.isPropertyAssignment(parent) && ts.TypeGuards.isObjectLiteralExpression(parent.getParent());
+	const parent = skipNodesUpwards(node.parent);
+	return ts.isPropertyAssignment(parent) && ts.isObjectLiteralExpression(parent.parent);
 }
 
-export function isMethodDeclaration(node: ts.Node<ts.ts.Node>): node is ts.MethodDeclaration | ts.FunctionExpression {
-	if (ts.TypeGuards.isParameteredNode(node)) {
+export function isMethodDeclaration(node: ts.Node): node is ts.MethodDeclaration | ts.FunctionExpression {
+	if (ts.isParameteredNode(node)) {
 		const thisParam = node.getParameter("this");
 		if (thisParam) {
 			return getType(thisParam).getText() !== "void";
 		} else {
 			return (
-				ts.TypeGuards.isMethodDeclaration(node) ||
-				ts.TypeGuards.isMethodSignature(node) ||
-				(ts.TypeGuards.isFunctionExpression(node) && isFunctionExpressionMethod(node))
+				ts.isMethodDeclaration(node) ||
+				ts.isMethodSignature(node) ||
+				(ts.isFunctionExpression(node) && isFunctionExpressionMethod(node))
 			);
 		}
 	}
@@ -90,8 +91,8 @@ export function isMethodDeclaration(node: ts.Node<ts.ts.Node>): node is ts.Metho
 }
 
 function compileFunctionBody(state: CompilerState, body: ts.Node, node: HasParameters, initializers: Array<string>) {
-	const isBlock = ts.TypeGuards.isBlock(body);
-	const isExpression = ts.TypeGuards.isExpression(body);
+	const isBlock = ts.isBlock(body);
+	const isExpression = ts.isExpression(body);
 	let result = "";
 	if (isBlock || isExpression) {
 		result += "\n";
@@ -109,7 +110,7 @@ function compileFunctionBody(state: CompilerState, body: ts.Node, node: HasParam
 	} else {
 		/* istanbul ignore next */
 		throw new CompilerError(
-			`Unexpected function body ( ${body.getKindName()} ) in compileFunctionBody`,
+			`Unexpected function body ( ${getKindName(body)} ) in compileFunctionBody`,
 			node,
 			CompilerErrorType.BadFunctionBody,
 			true,
@@ -121,11 +122,11 @@ function compileFunctionBody(state: CompilerState, body: ts.Node, node: HasParam
 function canSugaryCompileFunction(node: HasParameters) {
 	if (node.getSourceFile().getExtension() === "tsx") {
 		return false;
-	} else if (ts.TypeGuards.isConstructorDeclaration(node)) {
+	} else if (ts.isConstructorDeclaration(node)) {
 		return true;
-	} else if (ts.TypeGuards.isFunctionDeclaration(node) || ts.TypeGuards.isMethodDeclaration(node)) {
-		const nameNode = node.getNameNode();
-		if (nameNode && ts.TypeGuards.isIdentifier(nameNode) && isValidLuaIdentifier(node.getName()!)) {
+	} else if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
+		const nameNode = node.name;
+		if (nameNode && ts.isIdentifier(nameNode) && isValidLuaIdentifier(getName(node)!)) {
 			return true;
 		}
 	}
@@ -136,7 +137,7 @@ function compileFunction(
 	state: CompilerState,
 	node: HasParameters,
 	name: string,
-	body: ts.Node<ts.ts.Node>,
+	body: ts.Node,
 	namePrefix = "",
 ) {
 	isDefinedAsMethod(node);
@@ -152,8 +153,8 @@ function compileFunction(
 	let backWrap = "";
 	let declarationPrefix = "";
 
-	if (ts.TypeGuards.isFunctionDeclaration(node)) {
-		const nameNode = node.getNameNode();
+	if (ts.isFunctionDeclaration(node)) {
+		const nameNode = node.name;
 		if (nameNode && shouldHoist(node, nameNode)) {
 			state.pushHoistStack(name);
 		} else {
@@ -163,14 +164,14 @@ function compileFunction(
 
 	let isGenerator = false;
 
-	if (!ts.TypeGuards.isConstructorDeclaration(node)) {
+	if (!ts.isConstructorDeclaration(node)) {
 		/* istanbul ignore next */
 		if (node.isAsync()) {
 			state.usesTSLibrary = true;
 			frontWrap += "TS.async(";
 			backWrap += ")" + backWrap;
 		}
-		isGenerator = !ts.TypeGuards.isArrowFunction(node) && node.isGenerator();
+		isGenerator = !ts.isArrowFunction(node) && node.isGenerator();
 	}
 
 	const isMethod = isMethodDeclaration(node);
@@ -236,7 +237,7 @@ export function compileFunctionDeclaration(state: CompilerState, node: ts.Functi
 	const body = node.getBody();
 
 	if (body) {
-		const nameNode = node.getNameNode();
+		const nameNode = node.name;
 		const name = nameNode ? checkReserved(nameNode) : state.getNewId();
 		state.pushExport(name, node);
 		return compileFunction(state, node, name, body);
@@ -246,11 +247,11 @@ export function compileFunctionDeclaration(state: CompilerState, node: ts.Functi
 }
 
 export function compileMethodDeclaration(state: CompilerState, node: ts.MethodDeclaration, namePrefix: string) {
-	const nameNode = node.getNameNode();
+	const nameNode = node.name;
 	let name: string;
 
-	if (ts.TypeGuards.isComputedPropertyName(nameNode)) {
-		name = `[${compileExpression(state, skipNodesDownwards(nameNode.getExpression()))}]`;
+	if (ts.isComputedPropertyName(nameNode)) {
+		name = `[${compileExpression(state, skipNodesDownwards(nameNode.expression))}]`;
 	} else {
 		name = compileExpression(state, nameNode);
 		if (!isValidLuaIdentifier(name)) {
@@ -261,12 +262,12 @@ export function compileMethodDeclaration(state: CompilerState, node: ts.MethodDe
 	return compileFunction(state, node, name, node.getBodyOrThrow(), namePrefix);
 }
 
-function containsSuperExpression(child?: ts.Statement<ts.ts.Statement>) {
-	if (child && ts.TypeGuards.isExpressionStatement(child)) {
-		const exp = skipNodesDownwards(child.getExpression());
-		if (ts.TypeGuards.isCallExpression(exp)) {
-			const superExp = skipNodesDownwards(exp.getExpression());
-			if (ts.TypeGuards.isSuperExpression(superExp)) {
+function containsSuperExpression(child?: ts.Statement<ts.Statement>) {
+	if (child && ts.isExpressionStatement(child)) {
+		const exp = skipNodesDownwards(child.expression);
+		if (ts.isCallExpression(exp)) {
+			const superExp = skipNodesDownwards(exp.expression);
+			if (isSuperExpression(superExp)) {
 				return true;
 			}
 		}
@@ -308,10 +309,10 @@ export function compileConstructorDeclaration(
 
 	if (node) {
 		const body = node.getBodyOrThrow();
-		if (ts.TypeGuards.isBlock(body)) {
+		if (ts.isBlock(body)) {
 			defaults.forEach(initializer => (result += state.indent + initializer + "\n"));
 
-			const bodyStatements = body.getStatements();
+			const bodyStatements = body.statements;
 			let k = 0;
 
 			if (containsSuperExpression(bodyStatements[k])) {
@@ -356,8 +357,8 @@ export function compileFunctionExpression(state: CompilerState, node: ts.Functio
 	const potentialNameNode = node.getChildAtIndex(1);
 
 	if (
-		ts.TypeGuards.isFunctionExpression(node) &&
-		ts.TypeGuards.isIdentifier(potentialNameNode) &&
+		ts.isFunctionExpression(node) &&
+		ts.isIdentifier(potentialNameNode) &&
 		potentialNameNode.findReferences()[0].getReferences().length > 1
 	) {
 		const name = compileExpression(state, potentialNameNode);

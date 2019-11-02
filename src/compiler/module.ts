@@ -1,5 +1,5 @@
 import path from "path";
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { checkReserved, compileExpression } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -14,13 +14,14 @@ import {
 	transformPathToLua,
 } from "../utility/general";
 import { isRbxService, isUsedExclusivelyAsType } from "../utility/type";
+import { getKindName, getName, getFirstAncestorByKind } from "../utility/ast";
 
-function isDefinitionALet(def: ts.DefinitionInfo<ts.ts.DefinitionInfo>) {
-	const parent = skipNodesUpwards(def.getNode().getParent());
-	if (parent && ts.TypeGuards.isVariableDeclaration(parent)) {
-		const grandparent = skipNodesUpwards(parent.getParent());
+function isDefinitionALet(def: ts.DefinitionInfo<ts.DefinitionInfo>) {
+	const parent = skipNodesUpwards(def.getNode().parent);
+	if (parent && ts.isVariableDeclaration(parent)) {
+		const grandparent = skipNodesUpwards(parent.parent);
 		return (
-			ts.TypeGuards.isVariableDeclarationList(grandparent) &&
+			ts.isVariableDeclarationList(grandparent) &&
 			grandparent.getDeclarationKind() === ts.VariableDeclarationKind.Let
 		);
 	}
@@ -38,7 +39,7 @@ function shouldLocalizeImport(namedImport: ts.Identifier) {
 
 function getRojoUnavailableError(node: ts.Node) {
 	return new CompilerError(
-		`Failed to load Rojo configuration! Cannot compile ${node.getKindName()}`,
+		`Failed to load Rojo configuration! Cannot compile ${getKindName(node)}`,
 		node,
 		CompilerErrorType.BadRojo,
 	);
@@ -236,7 +237,7 @@ export function compileImportDeclaration(state: CompilerState, node: ts.ImportDe
 		!isSideEffect &&
 		(!namespaceImport || isUsedExclusivelyAsType(namespaceImport)) &&
 		(!defaultImport || isUsedExclusivelyAsType(defaultImport)) &&
-		namedImports.every(namedImport => isUsedExclusivelyAsType(namedImport.getNameNode()))
+		namedImports.every(namedImport => isUsedExclusivelyAsType(namedImport.name))
 	) {
 		return "";
 	}
@@ -275,7 +276,7 @@ export function compileImportDeclaration(state: CompilerState, node: ts.ImportDe
 		const defaultImportExp = compileExpression(state, defaultImport);
 		checkReserved(defaultImport);
 
-		if (exportAssignments && exportAssignments.length === 1 && exportAssignments[0].isExportEquals()) {
+		if (exportAssignments && exportAssignments.length === 1 && exportAssignments[0].isExportEquals) {
 			state.usesTSLibrary = true;
 			// If the defaultImport is importing an `export = ` statement,
 			return `local ${defaultImportExp} = ${luaPath};\n`;
@@ -296,13 +297,13 @@ export function compileImportDeclaration(state: CompilerState, node: ts.ImportDe
 	let hasVarNames = false;
 
 	namedImports
-		.filter(namedImport => !isUsedExclusivelyAsType(namedImport.getNameNode()))
+		.filter(namedImport => !isUsedExclusivelyAsType(namedImport.name))
 		.forEach(namedImport => {
 			const aliasNode = namedImport.getAliasNode();
-			const nameNode = namedImport.getNameNode();
+			const nameNode = namedImport.name;
 			const name = nameNode.getText();
 			const alias = aliasNode ? aliasNode.getText() : name;
-			const shouldLocalize = shouldLocalizeImport(namedImport.getNameNode());
+			const shouldLocalize = shouldLocalizeImport(namedImport.name);
 
 			// keep these here no matter what, so that exports can take from initial state.
 			checkReserved(aliasNode || nameNode);
@@ -342,7 +343,7 @@ export function compileImportDeclaration(state: CompilerState, node: ts.ImportDe
 }
 
 export function compileImportEqualsDeclaration(state: CompilerState, node: ts.ImportEqualsDeclaration) {
-	const nameNode = node.getNameNode();
+	const nameNode = node.name;
 	const name = checkReserved(nameNode);
 
 	const isRoact = name === "Roact";
@@ -386,8 +387,8 @@ export function compileExportDeclaration(state: CompilerState, node: ts.ExportDe
 	}
 
 	const ancestor =
-		node.getFirstAncestorByKind(ts.SyntaxKind.ModuleDeclaration) ||
-		node.getFirstAncestorByKind(ts.SyntaxKind.SourceFile);
+		getFirstAncestorByKind(node, ts.SyntaxKind.ModuleDeclaration) ||
+		getFirstAncestorByKind(node, ts.SyntaxKind.SourceFile);
 
 	if (!ancestor) {
 		throw new CompilerError("Could not find export ancestor!", node, CompilerErrorType.BadAncestor, true);
@@ -407,8 +408,8 @@ export function compileExportDeclaration(state: CompilerState, node: ts.ExportDe
 
 		state.usesTSLibrary = true;
 		let ancestorName: string;
-		if (ts.TypeGuards.isNamespaceDeclaration(ancestor)) {
-			ancestorName = ancestor.getName();
+		if (ts.isModuleDeclaration(ancestor)) {
+			ancestorName = getName(ancestor);
 		} else {
 			state.isModule = true;
 			ancestorName = "exports";
@@ -417,14 +418,14 @@ export function compileExportDeclaration(state: CompilerState, node: ts.ExportDe
 	} else {
 		const namedExports = node
 			.getNamedExports()
-			.filter(namedExport => !isUsedExclusivelyAsType(namedExport.getNameNode()));
+			.filter(namedExport => !isUsedExclusivelyAsType(namedExport.name));
 		if (namedExports.length === 0) {
 			return "";
 		}
 
 		let ancestorName: string;
-		if (ts.TypeGuards.isNamespaceDeclaration(ancestor)) {
-			ancestorName = ancestor.getName();
+		if (ts.isModuleDeclaration(ancestor)) {
+			ancestorName = getName(ancestor);
 		} else {
 			state.isModule = true;
 			ancestorName = "exports";
@@ -432,7 +433,7 @@ export function compileExportDeclaration(state: CompilerState, node: ts.ExportDe
 
 		namedExports.forEach(namedExport => {
 			const aliasNode = namedExport.getAliasNode();
-			const nameNode = namedExport.getNameNode();
+			const nameNode = namedExport.name;
 			let name = nameNode.getText();
 			if (name === "default") {
 				name = "default";
@@ -467,8 +468,8 @@ export function compileExportDeclaration(state: CompilerState, node: ts.ExportDe
 }
 
 export function compileExportAssignment(state: CompilerState, node: ts.ExportAssignment) {
-	const exp = skipNodesDownwards(node.getExpression());
-	if (node.isExportEquals() && (!ts.TypeGuards.isIdentifier(exp) || !isUsedExclusivelyAsType(exp))) {
+	const exp = skipNodesDownwards(node.expression);
+	if (node.isExportEquals && (!ts.isIdentifier(exp) || !isUsedExclusivelyAsType(exp))) {
 		state.isModule = true;
 		state.enterPrecedingStatementContext();
 		const expStr = compileExpression(state, exp);
@@ -476,7 +477,7 @@ export function compileExportAssignment(state: CompilerState, node: ts.ExportAss
 	} else {
 		const symbol = node.getSymbol();
 		if (symbol) {
-			if (symbol.getName() === "default") {
+			if (getName(symbol) === "default") {
 				state.isModule = true;
 				state.enterPrecedingStatementContext();
 				const expStr = compileExpression(state, exp);

@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	compileArrayLiteralExpression,
 	compileAwaitExpression,
@@ -31,68 +31,69 @@ import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { isIdentifierWhoseDefinitionMatchesNode, skipNodesDownwards, skipNodesUpwards } from "../utility/general";
 import { isMethodDeclaration } from "./function";
+import { getKindName, isThisExpression, isSuperExpression } from "../utility/ast";
 
 export function compileExpression(state: CompilerState, node: ts.Expression): string {
-	if (ts.TypeGuards.isStringLiteral(node) || ts.TypeGuards.isNoSubstitutionTemplateLiteral(node)) {
+	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
 		return compileStringLiteral(state, node);
-	} else if (ts.TypeGuards.isNumericLiteral(node)) {
+	} else if (ts.isNumericLiteral(node)) {
 		return compileNumericLiteral(state, node);
-	} else if (ts.TypeGuards.isBooleanLiteral(node)) {
+	} else if (ts.isBooleanLiteral(node)) {
 		return compileBooleanLiteral(state, node);
-	} else if (ts.TypeGuards.isArrayLiteralExpression(node)) {
+	} else if (ts.isArrayLiteralExpression(node)) {
 		return compileArrayLiteralExpression(state, node);
-	} else if (ts.TypeGuards.isObjectLiteralExpression(node)) {
+	} else if (ts.isObjectLiteralExpression(node)) {
 		return compileObjectLiteralExpression(state, node);
-	} else if (ts.TypeGuards.isFunctionExpression(node) || ts.TypeGuards.isArrowFunction(node)) {
+	} else if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
 		return compileFunctionExpression(state, node);
-	} else if (ts.TypeGuards.isCallExpression(node)) {
+	} else if (ts.isCallExpression(node)) {
 		return compileCallExpression(state, node);
-	} else if (ts.TypeGuards.isIdentifier(node)) {
+	} else if (ts.isIdentifier(node)) {
 		return compileIdentifier(state, node);
-	} else if (ts.TypeGuards.isBinaryExpression(node)) {
+	} else if (ts.isBinaryExpression(node)) {
 		return compileBinaryExpression(state, node);
-	} else if (ts.TypeGuards.isPrefixUnaryExpression(node)) {
+	} else if (ts.isPrefixUnaryExpression(node)) {
 		return compilePrefixUnaryExpression(state, node);
-	} else if (ts.TypeGuards.isPostfixUnaryExpression(node)) {
+	} else if (ts.isPostfixUnaryExpression(node)) {
 		return compilePostfixUnaryExpression(state, node);
-	} else if (ts.TypeGuards.isPropertyAccessExpression(node)) {
+	} else if (ts.isPropertyAccessExpression(node)) {
 		return compilePropertyAccessExpression(state, node);
-	} else if (ts.TypeGuards.isNewExpression(node)) {
+	} else if (ts.isNewExpression(node)) {
 		return compileNewExpression(state, node);
-	} else if (ts.TypeGuards.isParenthesizedExpression(node)) {
+	} else if (ts.isParenthesizedExpression(node)) {
 		return compileParenthesizedExpression(state, node);
-	} else if (ts.TypeGuards.isTemplateExpression(node)) {
+	} else if (ts.isTemplateExpression(node)) {
 		return compileTemplateExpression(state, node);
-	} else if (ts.TypeGuards.isTaggedTemplateExpression(node)) {
+	} else if (ts.isTaggedTemplateExpression(node)) {
 		return compileTaggedTemplateExpression(state, node);
-	} else if (ts.TypeGuards.isElementAccessExpression(node)) {
+	} else if (ts.isElementAccessExpression(node)) {
 		return compileElementAccessExpression(state, node);
-	} else if (ts.TypeGuards.isAwaitExpression(node)) {
+	} else if (ts.isAwaitExpression(node)) {
 		return compileAwaitExpression(state, node);
-	} else if (ts.TypeGuards.isConditionalExpression(node)) {
+	} else if (ts.isConditionalExpression(node)) {
 		return compileConditionalExpression(state, node);
-	} else if (ts.TypeGuards.isJsxExpression(node)) {
+	} else if (ts.isJsxExpression(node)) {
 		return compileExpression(state, node.getExpressionOrThrow());
-	} else if (ts.TypeGuards.isJsxSelfClosingElement(node)) {
+	} else if (ts.isJsxSelfClosingElement(node)) {
 		return compileJsxSelfClosingElement(state, node);
-	} else if (ts.TypeGuards.isJsxElement(node)) {
+	} else if (ts.isJsxElement(node)) {
 		return compileJsxElement(state, node);
-	} else if (ts.TypeGuards.isSpreadElement(node)) {
+	} else if (ts.isSpreadElement(node)) {
 		return compileSpreadElement(state, node);
-	} else if (ts.TypeGuards.isClassExpression(node)) {
+	} else if (ts.isClassExpression(node)) {
 		return compileClassExpression(state, node);
-	} else if (ts.TypeGuards.isYieldExpression(node)) {
+	} else if (ts.isYieldExpression(node)) {
 		return compileYieldExpression(state, node);
-	} else if (ts.TypeGuards.isOmittedExpression(node)) {
+	} else if (ts.isOmittedExpression(node)) {
 		return "nil";
-	} else if (ts.TypeGuards.isThisExpression(node)) {
+	} else if (isThisExpression(node)) {
 		if (
 			!node.getFirstAncestor(
 				ancestor =>
 					isMethodDeclaration(ancestor) ||
-					ts.TypeGuards.isClassDeclaration(ancestor) ||
-					ts.TypeGuards.isObjectLiteralExpression(ancestor) ||
-					ts.TypeGuards.isClassExpression(ancestor),
+					ts.isClassDeclaration(ancestor) ||
+					ts.isObjectLiteralExpression(ancestor) ||
+					ts.isClassExpression(ancestor),
 			)
 		) {
 			throw new CompilerError(
@@ -102,17 +103,17 @@ export function compileExpression(state: CompilerState, node: ts.Expression): st
 			);
 		}
 		return "self";
-	} else if (ts.TypeGuards.isSuperExpression(node)) {
+	} else if (isSuperExpression(node)) {
 		return compileSuperExpression(state, node);
 	} else if (
-		ts.TypeGuards.isAsExpression(node) ||
-		ts.TypeGuards.isTypeAssertion(node) ||
-		ts.TypeGuards.isNonNullExpression(node)
+		ts.isAsExpression(node) ||
+		ts.isTypeAssertion(node) ||
+		ts.isNonNullExpression(node)
 	) {
-		return compileExpression(state, skipNodesDownwards(node.getExpression()));
-	} else if (ts.TypeGuards.isNullLiteral(node)) {
+		return compileExpression(state, skipNodesDownwards(node.expression));
+	} else if (ts.isNullLiteral(node)) {
 		throw new CompilerError("'null' is not supported! Use 'undefined' instead.", node, CompilerErrorType.NoNull);
-	} else if (ts.TypeGuards.isTypeOfExpression(node)) {
+	} else if (ts.isTypeOfExpression(node)) {
 		throw new CompilerError(
 			"'typeof' operator is not supported! Use `typeIs(value, type)` or `typeOf(value)` instead.",
 			node,
@@ -120,7 +121,7 @@ export function compileExpression(state: CompilerState, node: ts.Expression): st
 		);
 	} else {
 		throw new CompilerError(
-			`Unexpected expression ( ${node.getKindName()} ) in compileExpression`,
+			`Unexpected expression ( ${getKindName(node)} ) in compileExpression`,
 			node,
 			CompilerErrorType.BadExpression,
 			true,
@@ -132,26 +133,26 @@ export function compileExpressionStatement(state: CompilerState, node: ts.Expres
 	state.enterPrecedingStatementContext();
 
 	let expStr: string;
-	const expression = skipNodesDownwards(node.getExpression());
+	const expression = skipNodesDownwards(node.expression);
 
-	if (ts.TypeGuards.isCallExpression(expression)) {
+	if (ts.isCallExpression(expression)) {
 		expStr = compileCallExpression(state, expression, true);
 	} else {
 		expStr = compileExpression(state, expression);
 
 		// big set of rules for expression statements
 		if (
-			!ts.TypeGuards.isNewExpression(expression) &&
-			!ts.TypeGuards.isAwaitExpression(expression) &&
-			!ts.TypeGuards.isPostfixUnaryExpression(expression) &&
+			!ts.isNewExpression(expression) &&
+			!ts.isAwaitExpression(expression) &&
+			!ts.isPostfixUnaryExpression(expression) &&
 			!(
-				ts.TypeGuards.isPrefixUnaryExpression(expression) &&
-				(expression.getOperatorToken() === ts.SyntaxKind.PlusPlusToken ||
-					expression.getOperatorToken() === ts.SyntaxKind.MinusMinusToken)
+				ts.isPrefixUnaryExpression(expression) &&
+				(expression.operatorToken === ts.SyntaxKind.PlusPlusToken ||
+					expression.operatorToken === ts.SyntaxKind.MinusMinusToken)
 			) &&
-			!(ts.TypeGuards.isBinaryExpression(expression) && isSetToken(expression.getOperatorToken().getKind())) &&
-			!ts.TypeGuards.isYieldExpression(expression) &&
-			!ts.TypeGuards.isJsxElement(expression)
+			!(ts.isBinaryExpression(expression) && isSetToken(expression.operatorToken.kind)) &&
+			!ts.isYieldExpression(expression) &&
+			!ts.isJsxElement(expression)
 		) {
 			expStr = `local _ = ${expStr}`;
 		}
@@ -166,23 +167,23 @@ export function compileExpressionStatement(state: CompilerState, node: ts.Expres
 }
 
 export function expressionModifiesVariable(
-	node: ts.Node<ts.ts.Node>,
+	node: ts.Node,
 	lhs?: ts.Identifier,
 ): node is ts.BinaryExpression | ts.PrefixUnaryExpression | ts.PostfixUnaryExpression {
 	if (
-		ts.TypeGuards.isPostfixUnaryExpression(node) ||
-		(ts.TypeGuards.isPrefixUnaryExpression(node) &&
-			(node.getOperatorToken() === ts.SyntaxKind.PlusPlusToken ||
-				node.getOperatorToken() === ts.SyntaxKind.MinusMinusToken))
+		ts.isPostfixUnaryExpression(node) ||
+		(ts.isPrefixUnaryExpression(node) &&
+			(node.operator === ts.SyntaxKind.PlusPlusToken ||
+				node.operator === ts.SyntaxKind.MinusMinusToken))
 	) {
 		if (lhs) {
-			return isIdentifierWhoseDefinitionMatchesNode(node.getOperand(), lhs);
+			return isIdentifierWhoseDefinitionMatchesNode(node.operand, lhs);
 		} else {
 			return true;
 		}
-	} else if (ts.TypeGuards.isBinaryExpression(node) && isSetToken(node.getOperatorToken().getKind())) {
+	} else if (ts.isBinaryExpression(node) && isSetToken(node.operatorToken.kind)) {
 		if (lhs) {
-			return isIdentifierWhoseDefinitionMatchesNode(node.getLeft(), lhs);
+			return isIdentifierWhoseDefinitionMatchesNode(node.left, lhs);
 		} else {
 			return true;
 		}
@@ -197,7 +198,7 @@ export function appendDeclarationIfMissing(
 ) {
 	if (
 		compiledNode.match(/^_d+$/) ||
-		ts.TypeGuards.isExpressionStatement(skipNodesUpwards(possibleExpressionStatement))
+		ts.isExpressionStatement(skipNodesUpwards(possibleExpressionStatement))
 	) {
 		return "local _ = " + compiledNode;
 	} else {
@@ -207,14 +208,14 @@ export function appendDeclarationIfMissing(
 
 export function placeIncrementorInStatementIfExpression(
 	state: CompilerState,
-	incrementor: ts.Expression<ts.ts.Expression>,
+	incrementor: ts.Expression<ts.Expression>,
 	incrementorStr: string,
 ) {
-	if (ts.TypeGuards.isExpression(incrementor)) {
+	if (ts.isExpression(incrementor)) {
 		if (
-			!ts.TypeGuards.isCallExpression(incrementor) &&
+			!ts.isCallExpression(incrementor) &&
 			!expressionModifiesVariable(incrementor) &&
-			!ts.TypeGuards.isVariableDeclarationList(incrementor)
+			!ts.isVariableDeclarationList(incrementor)
 		) {
 			incrementorStr = `local _ = ` + incrementorStr;
 		}

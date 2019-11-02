@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	checkNonAny,
 	compileCallExpression,
@@ -26,14 +26,15 @@ import { compileBindingLiteral, getSubTypeOrThrow } from "./binding";
 import { isDefinedAsMethod } from "./call";
 import { isMethodDeclaration } from "./function";
 import { compileLogicalBinary } from "./truthiness";
+import { getKindName, isThisExpression, isSuperExpression, getParentOrThrow } from "../utility/ast";
 
 function getLuaAddExpression(node: ts.BinaryExpression, lhsStr: string, rhsStr: string, wrap = false) {
 	if (wrap) {
 		rhsStr = `(${rhsStr})`;
 	}
 
-	const lhsType = getType(node.getLeft());
-	const rhsType = getType(node.getRight());
+	const lhsType = getType(node.left);
+	const rhsType = getType(node.right);
 
 	const lhsIsStr = isStringType(lhsType);
 	const lhsIsNum = isNumberType(lhsType);
@@ -63,7 +64,7 @@ function getLuaAddExpression(node: ts.BinaryExpression, lhsStr: string, rhsStr: 
 	}
 }
 
-export function isSetToken(opKind: ts.ts.SyntaxKind) {
+export function isSetToken(opKind: ts.SyntaxKind) {
 	return (
 		opKind === ts.SyntaxKind.EqualsToken ||
 		opKind === ts.SyntaxKind.BarEqualsToken ||
@@ -91,9 +92,9 @@ function compileBinaryLiteral(
 
 	let rootId: string;
 	if (
-		(ts.TypeGuards.isIdentifier(rhs) && !isIdentifierDefinedInExportLet(rhs)) ||
-		ts.TypeGuards.isThisExpression(rhs) ||
-		ts.TypeGuards.isSuperExpression(rhs)
+		(ts.isIdentifier(rhs) && !isIdentifierDefinedInExportLet(rhs)) ||
+		isThisExpression(rhs) ||
+		isSuperExpression(rhs)
 	) {
 		rootId = compileExpression(state, rhs);
 	} else {
@@ -103,9 +104,9 @@ function compileBinaryLiteral(
 
 	statements.push(...compileBindingLiteral(state, lhs, rootId, getType(rhs)));
 
-	const parent = skipNodesUpwards(node.getParentOrThrow());
+	const parent = skipNodesUpwards(getParentOrThrow(node));
 
-	if (ts.TypeGuards.isExpressionStatement(parent) || ts.TypeGuards.isForStatement(parent)) {
+	if (ts.isExpressionStatement(parent) || ts.isForStatement(parent)) {
 		let result = "";
 		statements.forEach(statementStr => (result += state.indent + statementStr + "\n"));
 		return result.replace(/;\n$/, ""); // terrible hack
@@ -116,17 +117,17 @@ function compileBinaryLiteral(
 }
 
 export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExpression) {
-	const nodeParent = skipNodesUpwards(node.getParentOrThrow());
-	const parentKind = nodeParent.getKind();
+	const nodeParent = skipNodesUpwards(getParentOrThrow(node));
+	const parentKind = nodeParent.kind;
 	const isStatement = parentKind === ts.SyntaxKind.ExpressionStatement || parentKind === ts.SyntaxKind.ForStatement;
 
-	const opToken = node.getOperatorToken();
-	const opKind = opToken.getKind();
+	const opToken = node.operatorToken;
+	const opKind = opToken.kind;
 	const isEqualsOperation = opKind === ts.SyntaxKind.EqualsToken;
 
-	const rawRhs = node.getRight();
+	const rawRhs = node.right;
 
-	let lhs = skipNodesDownwards(node.getLeft(), true);
+	let lhs = skipNodesDownwards(node.left, true);
 	const rhs = skipNodesDownwards(rawRhs, true);
 	let lhsStr: string;
 	let rhsStr: string;
@@ -136,7 +137,7 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 		if (isLhsMethod !== undefined && isLhsMethod !== isMethodDeclaration(rhs)) {
 			throw new CompilerError(
 				`Attempted to set a ${isLhsMethod ? "method" : "callback"} variable to a ${
-					isLhsMethod ? "callback" : "method"
+				isLhsMethod ? "callback" : "method"
 				}.`,
 				node,
 				CompilerErrorType.MixedMethodSet,
@@ -148,20 +149,20 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 	}
 
 	// binding patterns
-	if (ts.TypeGuards.isArrayLiteralExpression(lhs)) {
-		// const isFlatBinding = lhs.getElements().every(v => ts.TypeGuards.isIdentifier(v));
+	if (ts.isArrayLiteralExpression(lhs)) {
+		// const isFlatBinding = lhs.elements.every(v => ts.isIdentifier(v));
 
-		if (rhs && ts.TypeGuards.isCallExpression(rhs) && isTupleReturnTypeCall(rhs)) {
+		if (rhs && ts.isCallExpression(rhs) && isTupleReturnTypeCall(rhs)) {
 			let result = "";
 			const statements = new Array<string>();
 			const names = lhs
-				.getElements()
+				.elements
 				.map((element, i) => {
-					if (ts.TypeGuards.isOmittedExpression(element)) {
+					if (ts.isOmittedExpression(element)) {
 						return "_";
 					} else if (
-						ts.TypeGuards.isArrayLiteralExpression(element) ||
-						ts.TypeGuards.isObjectLiteralExpression(element)
+						ts.isArrayLiteralExpression(element) ||
+						ts.isObjectLiteralExpression(element)
 					) {
 						const rootId = state.getNewId();
 						result += state.indent + `local ${rootId};\n`;
@@ -197,20 +198,20 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 		} else {
 			return compileBinaryLiteral(state, node, lhs, rhs);
 		}
-	} else if (ts.TypeGuards.isObjectLiteralExpression(lhs)) {
+	} else if (ts.isObjectLiteralExpression(lhs)) {
 		return compileBinaryLiteral(state, node, lhs, rhs);
 	}
 
 	if (isSetToken(opKind)) {
 		lhs = skipNodesDownwards(lhs);
-		let isLhsIdentifier = ts.TypeGuards.isIdentifier(lhs) && !isIdentifierDefinedInExportLet(lhs);
+		let isLhsIdentifier = ts.isIdentifier(lhs) && !isIdentifierDefinedInExportLet(lhs);
 
 		let rhsStrContext: PrecedingStatementContext;
 		let hasOpenContext = false;
 		let stashedInnerStr: (() => string) | undefined;
 
 		const upperContext = state.getCurrentPrecedingStatementContext(node);
-		if (ts.TypeGuards.isElementAccessExpression(lhs)) {
+		if (ts.isElementAccessExpression(lhs)) {
 			const compileLhsStr = compileElementAccessDataTypeExpression(
 				state,
 				lhs,
@@ -221,7 +222,7 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 			if (
 				!isConstantExpression(lhs.getArgumentExpressionOrThrow(), 0) &&
 				// Always push array values, even when isPushed, because we need to increment by 1
-				(!upperContext.isPushed || isArrayType(getType(lhs.getExpression())))
+				(!upperContext.isPushed || isArrayType(getType(lhs.expression)))
 			) {
 				const previousInner = innerStr;
 				const previouslyPushed = upperContext.isPushed;
@@ -273,8 +274,8 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 		const previouslhs = isEqualsOperation
 			? ""
 			: isStatement && rhsStrContext.length === 0
-			? lhsStr
-			: state.pushPrecedingStatementToNewId(lhs, lhsStr);
+				? lhsStr
+				: state.pushPrecedingStatementToNewId(lhs, lhsStr);
 
 		let { isPushed } = rhsStrContext;
 		state.pushPrecedingStatements(rhs, ...rhsStrContext);
@@ -438,7 +439,7 @@ export function compileBinaryExpression(state: CompilerState, node: ts.BinaryExp
 		return `TS.instanceof(${lhsStr}, ${rhsStr})`;
 	} else {
 		throw new CompilerError(
-			`Unexpected BinaryExpression (${node.getOperatorToken().getKindName()})  in compileBinaryExpression #2`,
+			`Unexpected BinaryExpression (${getKindName(node.operatorToken)})  in compileBinaryExpression #2`,
 			opToken,
 			CompilerErrorType.BadBinaryExpression,
 			true,

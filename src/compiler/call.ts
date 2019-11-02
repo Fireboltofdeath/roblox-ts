@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts, { isThisTypeNode } from "typescript";
 import {
 	addOneToArrayIndex,
 	appendDeclarationIfMissing,
@@ -34,6 +34,7 @@ import {
 	shouldPushToPrecedingStatement,
 	superExpressionClassInheritsFromArray,
 } from "../utility/type";
+import { getName, isThisExpression, isSuperExpression } from "../utility/ast";
 
 const STRING_MACRO_METHODS = new Set(["format", "gmatch", "gsub", "lower", "rep", "reverse", "upper"]);
 
@@ -41,17 +42,17 @@ export function shouldWrapExpression(subExp: ts.Node, strict: boolean) {
 	subExp = skipNodesDownwards(subExp);
 
 	return (
-		!ts.TypeGuards.isIdentifier(subExp) &&
-		!ts.TypeGuards.isThisExpression(subExp) &&
-		!ts.TypeGuards.isSuperExpression(subExp) &&
-		!ts.TypeGuards.isElementAccessExpression(subExp) &&
+		!ts.isIdentifier(subExp) &&
+		!isThisExpression(subExp) &&
+		!isSuperExpression(subExp) &&
+		!ts.isElementAccessExpression(subExp) &&
 		(strict ||
-			(!ts.TypeGuards.isCallExpression(subExp) &&
-				!ts.TypeGuards.isPropertyAccessExpression(subExp) &&
-				!ts.TypeGuards.isStringLiteral(subExp) &&
-				!ts.TypeGuards.isNewExpression(subExp) &&
-				!ts.TypeGuards.isClassExpression(subExp) &&
-				!ts.TypeGuards.isNumericLiteral(subExp)))
+			(!ts.isCallExpression(subExp) &&
+				!ts.isPropertyAccessExpression(subExp) &&
+				!ts.isStringLiteral(subExp) &&
+				!ts.isNewExpression(subExp) &&
+				!ts.isClassExpression(subExp) &&
+				!ts.isNumericLiteral(subExp)))
 	);
 }
 
@@ -59,14 +60,14 @@ function getLeftHandSideParent(subExp: ts.Node, climb: number = 3) {
 	let exp = skipNodesUpwards(subExp);
 
 	for (let i = 0; i < climb; i++) {
-		exp = skipNodesUpwards(exp.getParent()!);
+		exp = skipNodesUpwards(exp.parent!);
 	}
 
 	return exp;
 }
 
 function getPropertyCallParentIsExpressionStatement(subExp: ts.Expression) {
-	return ts.TypeGuards.isExpressionStatement(getLeftHandSideParent(subExp));
+	return ts.isExpressionStatement(getLeftHandSideParent(subExp));
 }
 
 type ReplaceFunction = (state: CompilerState, params: Array<ts.Expression>) => string | undefined;
@@ -141,8 +142,8 @@ function macroStringIndexFunction(
 				if (
 					previousParam &&
 					incrementing === wasIncrementing &&
-					ts.TypeGuards.isIdentifier(param) &&
-					ts.TypeGuards.isIdentifier(previousParam)
+					ts.isIdentifier(param) &&
+					ts.isIdentifier(previousParam)
 				) {
 					const definitions = param.getDefinitions().map(def => def.getNode());
 					if (previousParam.getDefinitions().every((def, j) => definitions[j] === def.getNode())) {
@@ -205,8 +206,8 @@ function padAmbiguous(state: CompilerState, params: Array<ts.Expression>) {
 	[str, maxLength, fillString] = compileCallArguments(state, params);
 
 	if (
-		!ts.TypeGuards.isStringLiteral(strParam) &&
-		(!ts.TypeGuards.isIdentifier(strParam) || isIdentifierDefinedInExportLet(strParam))
+		!ts.isStringLiteral(strParam) &&
+		(!ts.isIdentifier(strParam) || isIdentifierDefinedInExportLet(strParam))
 	) {
 		str = state.pushPrecedingStatementToNewId(strParam, str);
 	}
@@ -223,7 +224,7 @@ function padAmbiguous(state: CompilerState, params: Array<ts.Expression>) {
 			fillString = `(${fillString})`;
 		}
 
-		if (ts.TypeGuards.isStringLiteral(fillStringParam)) {
+		if (ts.isStringLiteral(fillStringParam)) {
 			fillStringLength = `${fillStringParam.getLiteralText().length}`;
 		} else {
 			fillStringLength = `#${fillString}`;
@@ -233,11 +234,11 @@ function padAmbiguous(state: CompilerState, params: Array<ts.Expression>) {
 	let targetLength: string;
 	let repititions: string | undefined;
 	let rawRepititions: number | undefined;
-	if (ts.TypeGuards.isStringLiteral(strParam)) {
-		if (maxLengthParam && ts.TypeGuards.isNumericLiteral(maxLengthParam)) {
+	if (ts.isStringLiteral(strParam)) {
+		if (maxLengthParam && ts.isNumericLiteral(maxLengthParam)) {
 			const literalTargetLength = maxLengthParam.getLiteralValue() - strParam.getLiteralText().length;
 
-			if (fillStringParam === undefined || ts.TypeGuards.isStringLiteral(fillStringParam)) {
+			if (fillStringParam === undefined || ts.isStringLiteral(fillStringParam)) {
 				rawRepititions = literalTargetLength / (fillStringParam ? fillStringParam.getLiteralText().length : 1);
 				repititions = `${Math.ceil(rawRepititions)}`;
 			}
@@ -261,10 +262,10 @@ function padAmbiguous(state: CompilerState, params: Array<ts.Expression>) {
 
 	return [
 		`${fillString}:rep(${repititions ||
-			(fillStringLength === "1"
-				? targetLength
-				: `math.ceil(${targetLength} / ${fillStringLength ? fillStringLength : 1})`)})${
-			doNotTrim ? "" : `:sub(1, ${targetLength})`
+		(fillStringLength === "1"
+			? targetLength
+			: `math.ceil(${targetLength} / ${fillStringLength ? fillStringLength : 1})`)})${
+		doNotTrim ? "" : `:sub(1, ${targetLength})`
 		}`,
 		str,
 	];
@@ -440,7 +441,7 @@ const ARRAY_REPLACE_METHODS: ReplaceMap = new Map<string, ReplaceFunction>([
 			const node = getLeftHandSideParent(subExp, 2);
 			const { length: numParams } = params;
 
-			if (params.some(param => ts.TypeGuards.isSpreadElement(param))) {
+			if (params.some(param => ts.isSpreadElement(param))) {
 				state.usesTSLibrary = true;
 				let arrayStr = compileExpression(state, subExp);
 				state.enterPrecedingStatementContext();
@@ -470,7 +471,7 @@ const ARRAY_REPLACE_METHODS: ReplaceMap = new Map<string, ReplaceFunction>([
 							state.pushPrecedingStatements(
 								subExp,
 								state.indent +
-									`${accessPath}[${accessor}] = ${compileExpression(state, firstParam)};\n`,
+								`${accessPath}[${accessor}] = ${compileExpression(state, firstParam)};\n`,
 							);
 						}
 
@@ -490,7 +491,7 @@ const ARRAY_REPLACE_METHODS: ReplaceMap = new Map<string, ReplaceFunction>([
 			const length = params.length;
 			const [subExp] = params;
 
-			if (params.some(param => ts.TypeGuards.isSpreadElement(param))) {
+			if (params.some(param => ts.isSpreadElement(param))) {
 				return undefined;
 			}
 
@@ -538,12 +539,12 @@ const ARRAY_REPLACE_METHODS: ReplaceMap = new Map<string, ReplaceFunction>([
 ]);
 
 function getPropertyAccessExpressionRoot(root: ts.Expression) {
-	while (ts.TypeGuards.isCallExpression(root)) {
-		const exp = root.getExpression();
-		if (!ts.TypeGuards.isPropertyAccessExpression(exp)) {
+	while (ts.isCallExpression(root)) {
+		const exp = root.expression;
+		if (!ts.isPropertyAccessExpression(exp)) {
 			break;
 		}
-		root = exp.getExpression();
+		root = exp.expression;
 	}
 	return root;
 }
@@ -558,7 +559,7 @@ function setKeyOfMapOrSet(kind: "map" | "set") {
 		let value: string;
 		[accessStr, key, value] = compileCallArguments(state, params);
 		const accessPath = getReadableExpressionName(state, root, accessStr);
-		if (kind === "map" && ts.TypeGuards.isSpreadElement(params[1])) {
+		if (kind === "map" && ts.isSpreadElement(params[1])) {
 			const newKey = state.getNewId();
 			value = state.getNewId();
 
@@ -572,8 +573,8 @@ function setKeyOfMapOrSet(kind: "map" | "set") {
 		} else {
 			const isPushed =
 				wasPushed ||
-				ts.TypeGuards.isNewExpression(root) ||
-				(ts.TypeGuards.isIdentifier(root) && isIdentifierDefinedInConst(root));
+				ts.isNewExpression(root) ||
+				(ts.isIdentifier(root) && isIdentifierDefinedInConst(root));
 
 			state.pushPrecedingStatements(subExp, state.indent + expStr + `;\n`);
 			state.getCurrentPrecedingStatementContext(subExp).isPushed = isPushed;
@@ -641,7 +642,7 @@ function makeGlobalExpressionMacro(compose: (arg1: string, arg2: string) => stri
 		const [subExp] = params;
 		let [obj, type] = compileCallArguments(state, params);
 
-		if (ts.TypeGuards.isSpreadElement(subExp)) {
+		if (ts.isSpreadElement(subExp)) {
 			const id = state.getNewId();
 			type = state.getNewId();
 
@@ -675,7 +676,7 @@ const GLOBAL_REPLACE_METHODS: ReplaceMap = new Map<string, ReplaceFunction>([
 
 export function compileList(
 	state: CompilerState,
-	args: Array<ts.Expression>,
+	args: ts.NodeArray<ts.Expression>,
 	compile: (state: CompilerState, expression: ts.Expression) => string = compileExpression,
 ) {
 	const argStrs = new Array<string>();
@@ -685,7 +686,7 @@ export function compileList(
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 
-		if (!ts.TypeGuards.isSpreadElement(arg)) {
+		if (!ts.isSpreadElement(arg)) {
 			checkNonAny(arg);
 		}
 
@@ -746,7 +747,7 @@ export function compileCallArgumentsAndJoin(state: CompilerState, args: Array<ts
 }
 
 function checkNonImportExpression(exp: ts.LeftHandSideExpression) {
-	if (ts.TypeGuards.isImportExpression(exp)) {
+	if (ts.isImportExpression(exp)) {
 		throw new CompilerError(
 			"Dynamic import expressions are not supported! Use 'require()' instead and assert the type.",
 			exp,
@@ -761,17 +762,17 @@ export function compileCallExpression(
 	node: ts.CallExpression,
 	doNotWrapTupleReturn = !isTupleReturnTypeCall(node),
 ) {
-	const exp = skipNodesDownwards(checkNonAny(checkNonImportExpression(node.getExpression())));
+	const exp = skipNodesDownwards(checkNonAny(checkNonImportExpression(node.expression)));
 	let result: string;
 
-	if (ts.TypeGuards.isPropertyAccessExpression(exp)) {
+	if (ts.isPropertyAccessExpression(exp)) {
 		result = compilePropertyCallExpression(state, node, exp);
-	} else if (ts.TypeGuards.isElementAccessExpression(exp)) {
+	} else if (ts.isElementAccessExpression(exp)) {
 		result = compileElementAccessCallExpression(state, node, exp);
 	} else {
-		const params = node.getArguments().map(arg => skipNodesDownwards(arg)) as Array<ts.Expression>;
+		const params = node.arguments.map(arg => skipNodesDownwards(arg)) as Array<ts.Expression>;
 
-		if (ts.TypeGuards.isSuperExpression(exp)) {
+		if (isSuperExpression(exp)) {
 			if (superExpressionClassInheritsFromArray(exp, false)) {
 				if (params.length > 0) {
 					throw new CompilerError(
@@ -781,7 +782,7 @@ export function compileCallExpression(
 					);
 				}
 
-				return ts.TypeGuards.isExpressionStatement(skipNodesUpwards(node.getParent()!)) ? "" : "nil";
+				return ts.isExpressionStatement(skipNodesUpwards(node.parent!)) ? "" : "nil";
 			} else if (inheritsFromRoact(exp.getType())) {
 				return "";
 			} else {
@@ -799,17 +800,17 @@ export function compileCallExpression(
 			}
 		}
 
-		if (ts.TypeGuards.isIdentifier(exp)) {
+		if (ts.isIdentifier(exp)) {
 			for (const def of exp.getDefinitions()) {
-				const definitionParent = skipNodesUpwards(skipNodesUpwards(def.getNode()).getParent());
+				const definitionParent = skipNodesUpwards(skipNodesUpwards(def.getNode()).parent);
 
 				if (
 					definitionParent &&
-					ts.TypeGuards.isFunctionExpression(definitionParent) &&
+					ts.isFunctionExpression(definitionParent) &&
 					isFunctionExpressionMethod(definitionParent)
 				) {
 					const alternative =
-						"this." + (skipNodesUpwards(definitionParent.getParent()) as ts.PropertyAssignment).getName();
+						"this." + getName(skipNodesUpwards(definitionParent.parent) as ts.PropertyAssignment);
 					throw new CompilerError(
 						`Cannot call local function expression \`${exp.getText()}\` (this is a foot-gun). Prefer \`${alternative}\``,
 						exp,
@@ -821,9 +822,9 @@ export function compileCallExpression(
 
 		let callPath = compileExpression(state, exp);
 		if (
-			ts.TypeGuards.isBinaryExpression(exp) ||
-			ts.TypeGuards.isArrowFunction(exp) ||
-			(ts.TypeGuards.isFunctionExpression(exp) && !exp.getNameNode())
+			ts.isBinaryExpression(exp) ||
+			ts.isArrowFunction(exp) ||
+			(ts.isFunctionExpression(exp) && !exp.name)
 		) {
 			callPath = `(${callPath})`;
 		}
@@ -880,10 +881,10 @@ export function getPropertyAccessExpressionType(
 	state: CompilerState,
 	expression: ts.PropertyAccessExpression,
 ): PropertyCallExpType {
-	checkApiAccess(state, expression.getNameNode());
+	checkApiAccess(state, expression.name);
 
 	const expType = getType(expression);
-	const property = expression.getName();
+	const property = getName(expression);
 
 	if (isArrayMethodType(expType)) {
 		return PropertyCallExpType.Array;
@@ -904,11 +905,11 @@ export function getPropertyAccessExpressionType(
 		return PropertyCallExpType.Map;
 	}
 
-	const subExp = skipNodesDownwards(expression.getExpression());
+	const subExp = skipNodesDownwards(expression.expression);
 	const subExpType = getType(subExp);
 	const subExpTypeSym = subExpType.getSymbol();
 
-	if (subExpTypeSym && ts.TypeGuards.isPropertyAccessExpression(expression)) {
+	if (subExpTypeSym && ts.isPropertyAccessExpression(expression)) {
 		const subExpTypeName = subExpTypeSym.getEscapedName();
 
 		// custom promises
@@ -998,13 +999,13 @@ export function compileElementAccessCallExpression(
 	node: ts.CallExpression,
 	expression: ts.ElementAccessExpression,
 ) {
-	const expExp = skipNodesDownwards(expression.getExpression());
-	const accessor = ts.TypeGuards.isSuperExpression(expExp) ? "super" : getReadableExpressionName(state, expExp);
+	const expExp = skipNodesDownwards(expression.expression);
+	const accessor = isSuperExpression(expExp) ? "super" : getReadableExpressionName(state, expExp);
 
 	const accessedPath = compileElementAccessDataTypeExpression(state, expression, accessor)(
 		compileElementAccessBracketExpression(state, expression),
 	);
-	const params = node.getArguments().map(arg => skipNodesDownwards(arg)) as Array<ts.Expression>;
+	const params = node.arguments.map(arg => skipNodesDownwards(arg)) as Array<ts.Expression>;
 	const isMethod = isDefinedAsMethod(expression)!;
 
 	let paramsStr = compileCallArgumentsAndJoin(state, params);
@@ -1012,7 +1013,7 @@ export function compileElementAccessCallExpression(
 	if (isMethod) {
 		paramsStr = paramsStr ? `${accessor}, ` + paramsStr : accessor;
 	} else {
-		if (ts.TypeGuards.isSuperExpression(expExp)) {
+		if (isSuperExpression(expExp)) {
 			throw new CompilerError(
 				`\`${accessedPath}\` is not a real method! Prefer \`this${accessedPath.slice(5)}\` instead.`,
 				expExp,
@@ -1029,12 +1030,12 @@ export function compilePropertyCallExpression(
 	node: ts.CallExpression,
 	expression: ts.PropertyAccessExpression,
 ) {
-	checkApiAccess(state, expression.getNameNode());
+	checkApiAccess(state, expression.name);
 
-	let property = expression.getName();
+	let property = getName(expression);
 	const params = [
-		skipNodesDownwards(expression.getExpression()),
-		...node.getArguments().map(arg => skipNodesDownwards(arg)),
+		skipNodesDownwards(expression.expression),
+		...node.arguments.map(arg => skipNodesDownwards(arg)),
 	] as Array<ts.Expression>;
 
 	switch (getPropertyAccessExpressionType(state, expression)) {
@@ -1069,7 +1070,7 @@ export function compilePropertyCallExpression(
 			const argStrs = compileCallArguments(state, params);
 			return appendDeclarationIfMissing(
 				state,
-				skipNodesUpwards(node.getParent()!),
+				skipNodesUpwards(node.parent!),
 				`(${argStrs[0]} + (${argStrs[1]}))`,
 			);
 		}
@@ -1077,7 +1078,7 @@ export function compilePropertyCallExpression(
 			const argStrs = compileCallArguments(state, params);
 			return appendDeclarationIfMissing(
 				state,
-				skipNodesUpwards(node.getParent()!),
+				skipNodesUpwards(node.parent!),
 				`(${argStrs[0]} - (${argStrs[1]}))`,
 			);
 		}
@@ -1085,7 +1086,7 @@ export function compilePropertyCallExpression(
 			const argStrs = compileCallArguments(state, params);
 			return appendDeclarationIfMissing(
 				state,
-				skipNodesUpwards(node.getParent()!),
+				skipNodesUpwards(node.parent!),
 				`(${argStrs[0]} * (${argStrs[1]}))`,
 			);
 		}
@@ -1093,7 +1094,7 @@ export function compilePropertyCallExpression(
 			const argStrs = compileCallArguments(state, params);
 			return appendDeclarationIfMissing(
 				state,
-				skipNodesUpwards(node.getParent()!),
+				skipNodesUpwards(node.parent!),
 				`(${argStrs[0]} / (${argStrs[1]}))`,
 			);
 		}
@@ -1108,7 +1109,7 @@ export function compilePropertyCallExpression(
 	const [subExp] = params;
 
 	if (isMethod) {
-		if (ts.TypeGuards.isSuperExpression(subExp)) {
+		if (isSuperExpression(subExp)) {
 			accessedPath = "super";
 			paramsStr = paramsStr ? "self, " + paramsStr : "self";
 			sep = ".";
@@ -1118,7 +1119,7 @@ export function compilePropertyCallExpression(
 	} else {
 		sep = ".";
 
-		if (ts.TypeGuards.isSuperExpression(subExp)) {
+		if (isSuperExpression(subExp)) {
 			throw new CompilerError(
 				`\`super.${property}\` is not a real method! Prefer \`this.${property}\` instead.`,
 				subExp,

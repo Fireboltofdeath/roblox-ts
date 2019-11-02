@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { checkReserved, compileCallExpression, compileExpression, concatNamesAndValues } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -16,38 +16,39 @@ import {
 } from "../utility/type";
 import { compileBindingPatternAndJoin } from "./binding";
 import { isValidLuaIdentifier } from "./security";
+import { isThisExpression } from "../utility/ast";
 
 export function compileVariableDeclaration(state: CompilerState, node: ts.VariableDeclaration) {
 	state.enterPrecedingStatementContext();
-	const lhs = node.getNameNode();
-	const rhs = skipNodesDownwards(node.getInitializer());
+	const lhs = node.name;
+	const rhs = skipNodesDownwards(node.initializer);
 
-	const parent = skipNodesUpwards(node.getParent());
-	const grandParent = skipNodesUpwards(parent.getParent());
-	const isExported = ts.TypeGuards.isVariableStatement(grandParent) && grandParent.isExported();
+	const parent = skipNodesUpwards(node.parent);
+	const grandParent = skipNodesUpwards(parent.parent);
+	const isExported = ts.isVariableStatement(grandParent) && grandParent.isExported();
 
 	let decKind = ts.VariableDeclarationKind.Const;
-	if (ts.TypeGuards.isVariableDeclarationList(parent)) {
+	if (ts.isVariableDeclarationList(parent)) {
 		decKind = parent.getDeclarationKind();
 	}
 
-	if (ts.TypeGuards.isArrayBindingPattern(lhs)) {
+	if (ts.isArrayBindingPattern(lhs)) {
 		const isFlatBinding = lhs
-			.getElements()
-			.filter(v => ts.TypeGuards.isBindingElement(v))
-			.every(v => ts.TypeGuards.isIdentifier(v.getChildAtIndex(0)));
+			.elements
+			.filter(v => ts.isBindingElement(v))
+			.every(v => ts.isIdentifier(v.getChildAtIndex(0)));
 
-		if (isFlatBinding && rhs && ts.TypeGuards.isCallExpression(rhs) && isTupleType(getType(rhs))) {
+		if (isFlatBinding && rhs && ts.isCallExpression(rhs) && isTupleType(getType(rhs))) {
 			const names = new Array<string>();
 			const values = new Array<string>();
-			for (const element of lhs.getElements()) {
-				if (ts.TypeGuards.isBindingElement(element)) {
-					const nameNode = element.getNameNode();
-					if (ts.TypeGuards.isIdentifier(nameNode)) {
+			for (const element of lhs.elements) {
+				if (ts.isBindingElement(element)) {
+					const nameNode = element.name;
+					if (ts.isIdentifier(nameNode)) {
 						checkReserved(nameNode);
 						names.push(compileExpression(state, nameNode));
 					}
-				} else if (ts.TypeGuards.isOmittedExpression(element)) {
+				} else if (ts.isOmittedExpression(element)) {
 					names.push("_");
 				}
 			}
@@ -57,7 +58,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 				concatNamesAndValues(state, names, values, false, str => (returnValue = str));
 				return state.exitPrecedingStatementContextAndJoin() + returnValue || "";
 			} else {
-				if (isExported && ts.TypeGuards.isVariableStatement(grandParent)) {
+				if (isExported && ts.isVariableStatement(grandParent)) {
 					names.forEach(name => state.pushExport(name, grandParent));
 				}
 				let returnValue: string | undefined;
@@ -68,7 +69,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 	}
 
 	let result = "";
-	if (ts.TypeGuards.isIdentifier(lhs)) {
+	if (ts.isIdentifier(lhs)) {
 		const name = checkReserved(lhs);
 		if (rhs) {
 			if (isExported && decKind === ts.VariableDeclarationKind.Let) {
@@ -82,7 +83,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 					result += state.indent + `${parentName}.${name} = ${value};\n`;
 				}
 			} else {
-				if (isExported && ts.TypeGuards.isVariableStatement(grandParent)) {
+				if (isExported && ts.isVariableStatement(grandParent)) {
 					state.pushExport(name, grandParent);
 				}
 				if (shouldHoist(grandParent, lhs)) {
@@ -111,7 +112,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 				result += state.indent + `local ${name};\n`;
 			}
 		}
-	} else if ((ts.TypeGuards.isArrayBindingPattern(lhs) || ts.TypeGuards.isObjectBindingPattern(lhs)) && rhs) {
+	} else if ((ts.isArrayBindingPattern(lhs) || ts.isObjectBindingPattern(lhs)) && rhs) {
 		// binding patterns MUST have rhs
 		let rhsStr = compileExpression(state, rhs);
 
@@ -121,7 +122,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 			rhsStr = id;
 		}
 
-		if (ts.TypeGuards.isArrayBindingPattern(lhs)) {
+		if (ts.isArrayBindingPattern(lhs)) {
 			const rhsType = getType(rhs);
 			if (
 				!isArrayType(rhsType) &&
@@ -129,7 +130,7 @@ export function compileVariableDeclaration(state: CompilerState, node: ts.Variab
 				!isSetType(rhsType) &&
 				!isGeneratorType(rhsType) &&
 				!isIterableFunctionType(rhsType) &&
-				(isObjectType(rhsType) || ts.TypeGuards.isThisExpression(rhs))
+				(isObjectType(rhsType) || isThisExpression(rhs))
 			) {
 				state.usesTSLibrary = true;
 				rhsStr = rhsStr;

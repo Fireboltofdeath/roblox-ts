@@ -1,51 +1,52 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, getWritableOperandName, isIdentifierDefinedInExportLet } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { removeBalancedParenthesisFromStringBorders, skipNodesDownwards, skipNodesUpwards } from "../utility/general";
 import { checkNonAny } from "./security";
 import { compileTruthyCheck } from "./truthiness";
+import { getParentOrThrow } from "../utility/ast";
 
 function isUnaryExpressionNonStatement(
-	parent: ts.Node<ts.ts.Node>,
+	parent: ts.Node,
 	node: ts.PrefixUnaryExpression | ts.PostfixUnaryExpression,
 ) {
 	return !(
-		ts.TypeGuards.isExpressionStatement(parent) ||
-		(ts.TypeGuards.isForStatement(parent) && parent.getCondition() !== node)
+		ts.isExpressionStatement(parent) ||
+		(ts.isForStatement(parent) && parent.condition !== node)
 	);
 }
 
-function getIncrementString(opKind: ts.ts.PrefixUnaryOperator, expStr: string, node: ts.Node, varName: string) {
+function getIncrementString(opKind: ts.PrefixUnaryOperator, expStr: string, node: ts.Node, varName: string) {
 	const op =
 		opKind === ts.SyntaxKind.PlusPlusToken
 			? " + "
 			: opKind === ts.SyntaxKind.MinusMinusToken
-			? " - "
-			: (() => {
+				? " - "
+				: (() => {
 					throw new CompilerError(
 						`Unexpected UnaryExpression ( ${opKind} ) in getIncrementString`,
 						node,
 						CompilerErrorType.BadPrefixUnaryExpression,
 						true,
 					);
-			  })();
+				})();
 
 	return `${varName ? `${varName} = ` : ""}${expStr}${op}1`;
 }
 
 export function compilePrefixUnaryExpression(state: CompilerState, node: ts.PrefixUnaryExpression) {
-	const operand = skipNodesDownwards(node.getOperand(), true);
+	const operand = skipNodesDownwards(node.operand, true);
 	checkNonAny(operand);
-	const opKind = node.getOperatorToken();
+	const opKind = node.operator;
 	if (opKind === ts.SyntaxKind.PlusPlusToken || opKind === ts.SyntaxKind.MinusMinusToken) {
-		const parent = skipNodesUpwards(node.getParentOrThrow());
+		const parent = skipNodesUpwards(getParentOrThrow(node));
 		const isNonStatement = isUnaryExpressionNonStatement(parent, node);
 		const expData = getWritableOperandName(state, operand);
 		const { expStr } = expData;
 
 		if (isNonStatement) {
-			if (!ts.TypeGuards.isIdentifier(operand) || isIdentifierDefinedInExportLet(operand)) {
+			if (!ts.isIdentifier(operand) || isIdentifierDefinedInExportLet(operand)) {
 				const id = state.pushToDeclarationOrNewId(
 					node,
 					getIncrementString(opKind, expStr, node, ""),
@@ -85,11 +86,11 @@ export function compilePrefixUnaryExpression(state: CompilerState, node: ts.Pref
 }
 
 export function compilePostfixUnaryExpression(state: CompilerState, node: ts.PostfixUnaryExpression) {
-	const operand = skipNodesDownwards(node.getOperand());
+	const operand = skipNodesDownwards(node.operand);
 	checkNonAny(operand);
-	const opKind = node.getOperatorToken();
+	const opKind = node.operator;
 	if (opKind === ts.SyntaxKind.PlusPlusToken || opKind === ts.SyntaxKind.MinusMinusToken) {
-		const parent = skipNodesUpwards(node.getParentOrThrow());
+		const parent = skipNodesUpwards(getParentOrThrow(node));
 		const isNonStatement = isUnaryExpressionNonStatement(parent, node);
 		const expData = getWritableOperandName(state, operand);
 		const { expStr } = expData;

@@ -1,9 +1,9 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression } from ".";
 import { CompilerState } from "../CompilerState";
 import { skipNodesDownwards, skipNodesUpwards } from "../utility/general";
 
 export function compileParenthesizedExpression(state: CompilerState, node: ts.ParenthesizedExpression) {
-	const expStr = compileExpression(state, skipNodesDownwards(node.getExpression()));
-	return ts.TypeGuards.isExpressionStatement(skipNodesUpwards(node.getParent())) ? expStr : `(${expStr})`;
+	const expStr = compileExpression(state, skipNodesDownwards(node.expression));
+	return ts.isExpressionStatement(skipNodesUpwards(node.parent)) ? expStr : `(${expStr})`;
 }

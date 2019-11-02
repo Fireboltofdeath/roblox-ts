@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileLoopBody, compileTruthyCheck } from ".";
 import { CompilerState } from "../CompilerState";
 import { removeBalancedParenthesisFromStringBorders, skipNodesDownwards } from "../utility/general";
@@ -9,12 +9,12 @@ export function compileDoStatement(state: CompilerState, node: ts.DoStatement) {
 	state.pushIndent();
 	result += state.indent + "do\n";
 	state.pushIndent();
-	result += compileLoopBody(state, node.getStatement());
+	result += compileLoopBody(state, node.statement);
 	state.popIndent();
 	result += state.indent + "end;\n";
 	state.enterPrecedingStatementContext();
 	const condition = removeBalancedParenthesisFromStringBorders(
-		compileTruthyCheck(state, skipNodesDownwards(node.getExpression())),
+		compileTruthyCheck(state, skipNodesDownwards(node.expression)),
 	);
 	result += state.exitPrecedingStatementContextAndJoin();
 	state.popIndent();

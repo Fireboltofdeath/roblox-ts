@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	checkApiAccess,
 	checkNonAny,
@@ -26,17 +26,18 @@ import {
 	isStringType,
 	isTupleReturnTypeCall,
 } from "../utility/type";
+import { getName, isConstEnum, getFirstAncestorByKind, isThisExpression, isSuperExpression, isTupleType } from "../utility/ast";
 
 export function isIdentifierDefinedInConst(exp: ts.Identifier) {
 	// I have no idea why, but getDefinitionNodes() cannot replace this
 	for (const def of exp.getDefinitions()) {
 		const node = def.getNode();
 		// Namespace name identifiers are not variables which can be changed at run-time
-		if (ts.TypeGuards.isNamespaceDeclaration(node.getParent()!)) {
+		if (ts.isModuleDeclaration(node.parent!)) {
 			return true;
 		}
 
-		const definition = node.getFirstAncestorByKind(ts.SyntaxKind.VariableDeclarationList);
+		const definition = getFirstAncestorByKind(node, ts.SyntaxKind.VariableDeclarationList);
 
 		if (definition && definition.getDeclarationKind() === ts.VariableDeclarationKind.Const) {
 			return true;
@@ -48,7 +49,7 @@ export function isIdentifierDefinedInConst(exp: ts.Identifier) {
 export function isIdentifierDefinedInExportLet(exp: ts.Identifier) {
 	// I have no idea why, but getDefinitionNodes() cannot replace this
 	for (const def of exp.getDefinitions()) {
-		const definition = def.getNode().getFirstAncestorByKind(ts.SyntaxKind.VariableStatement);
+		const definition = getFirstAncestorByKind(def.getNode(), ts.SyntaxKind.VariableStatement);
 		if (
 			definition &&
 			definition.hasExportKeyword() &&
@@ -65,24 +66,24 @@ export function isIdentifierDefinedInExportLet(exp: ts.Identifier) {
  * The rule in this case is that if there is a depth of 3 or more, e.g. `Foo.Bar.i`, we push `Foo.Bar`
  */
 export function getWritableOperandName(state: CompilerState, operand: ts.Expression, doNotCompileAccess = false) {
-	if (ts.TypeGuards.isPropertyAccessExpression(operand) || ts.TypeGuards.isElementAccessExpression(operand)) {
-		const child = skipNodesDownwards(operand.getExpression());
+	if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
+		const child = skipNodesDownwards(operand.expression);
 
 		if (
-			!ts.TypeGuards.isThisExpression(child) &&
-			!ts.TypeGuards.isSuperExpression(child) &&
-			(!ts.TypeGuards.isIdentifier(child) || isIdentifierDefinedInExportLet(child))
+			!isThisExpression(child) &&
+			!isSuperExpression(child) &&
+			(!ts.isIdentifier(child) || isIdentifierDefinedInExportLet(child))
 		) {
 			const id = state.pushPrecedingStatementToNewId(operand, compileExpression(state, child));
 
 			let propertyStr: string;
 			if (doNotCompileAccess) {
 				propertyStr = "";
-			} else if (ts.TypeGuards.isPropertyAccessExpression(operand)) {
-				propertyStr = safeLuaIndex(" ", compileExpression(state, operand.getNameNode()));
+			} else if (ts.isPropertyAccessExpression(operand)) {
+				propertyStr = safeLuaIndex(" ", compileExpression(state, operand.name));
 			} else {
 				const exp = skipNodesDownwards(operand.getArgumentExpressionOrThrow());
-				const fromNode = skipNodesDownwards(operand.getExpression());
+				const fromNode = skipNodesDownwards(operand.expression);
 				const access = getComputedPropertyAccess(state, exp, fromNode);
 				propertyStr = `[${access}]`;
 			}
@@ -90,10 +91,10 @@ export function getWritableOperandName(state: CompilerState, operand: ts.Express
 			return { expStr: id + propertyStr, isIdentifier: false };
 		} else if (doNotCompileAccess) {
 			return { expStr: compileExpression(state, child), isIdentifier: false };
-		} else if (ts.TypeGuards.isElementAccessExpression(operand)) {
+		} else if (ts.isElementAccessExpression(operand)) {
 			const id = compileExpression(state, child);
 			const exp = skipNodesDownwards(operand.getArgumentExpressionOrThrow());
-			const fromNode = skipNodesDownwards(operand.getExpression());
+			const fromNode = skipNodesDownwards(operand.expression);
 
 			if (
 				(isArrayType(getType(fromNode)) && !isNumericLiteralTypeStrict(getType(exp))) ||
@@ -110,7 +111,7 @@ export function getWritableOperandName(state: CompilerState, operand: ts.Express
 
 	return {
 		expStr: compileExpression(state, operand),
-		isIdentifier: ts.TypeGuards.isIdentifier(operand) && !isIdentifierDefinedInExportLet(operand),
+		isIdentifier: ts.isIdentifier(operand) && !isIdentifierDefinedInExportLet(operand),
 	};
 }
 
@@ -125,11 +126,11 @@ export function getReadableExpressionName(
 	const nonNullExp = skipNodesDownwards(exp);
 	if (
 		expStr.match(/^\(*_\d+\)*$/) ||
-		(ts.TypeGuards.isIdentifier(nonNullExp) && !isIdentifierDefinedInExportLet(nonNullExp)) ||
-		ts.TypeGuards.isThisExpression(nonNullExp) ||
-		ts.TypeGuards.isSuperExpression(nonNullExp) ||
+		(ts.isIdentifier(nonNullExp) && !isIdentifierDefinedInExportLet(nonNullExp)) ||
+		isThisExpression(nonNullExp) ||
+		isSuperExpression(nonNullExp) ||
 		// We know that new Sets and Maps are already ALWAYS pushed
-		(ts.TypeGuards.isNewExpression(nonNullExp) && (isSetType(getType(exp)) || isMapType(getType(exp))))
+		(ts.isNewExpression(nonNullExp) && (isSetType(getType(exp)) || isMapType(getType(exp))))
 	) {
 		return expStr;
 	} else {
@@ -138,13 +139,13 @@ export function getReadableExpressionName(
 }
 
 export function compilePropertyAccessExpression(state: CompilerState, node: ts.PropertyAccessExpression) {
-	const exp = skipNodesDownwards(node.getExpression());
-	const propertyStr = node.getName();
+	const exp = skipNodesDownwards(node.expression);
+	const propertyStr = getName(node);
 	const expType = getType(exp);
 	const propertyAccessExpressionType = getPropertyAccessExpressionType(state, node);
 
 	if (
-		getCompilerDirectiveWithLaxConstraint(expType, CompilerDirective.Array, t => t.isTuple()) &&
+		getCompilerDirectiveWithLaxConstraint(expType, CompilerDirective.Array, t => isTupleType(t)) &&
 		propertyStr === "length"
 	) {
 		throw new CompilerError(
@@ -160,29 +161,29 @@ export function compilePropertyAccessExpression(state: CompilerState, node: ts.P
 		);
 	}
 
-	const nameNode = node.getNameNode();
+	const nameNode = node.name;
 	checkApiAccess(state, nameNode);
 
 	checkNonAny(exp);
 	checkNonAny(nameNode);
 
-	if (ts.TypeGuards.isSuperExpression(exp)) {
+	if (isSuperExpression(exp)) {
 		return safeLuaIndex("self", propertyStr);
 	}
 
 	const symbol = expType.getSymbol();
 	if (symbol) {
-		const valDec = symbol.getValueDeclaration();
+		const valDec = symbol.valueDeclaration;
 		if (valDec) {
 			if (
-				ts.TypeGuards.isFunctionDeclaration(valDec) ||
-				ts.TypeGuards.isArrowFunction(valDec) ||
-				ts.TypeGuards.isFunctionExpression(valDec) ||
-				ts.TypeGuards.isMethodDeclaration(valDec)
+				ts.isFunctionDeclaration(valDec) ||
+				ts.isArrowFunction(valDec) ||
+				ts.isFunctionExpression(valDec) ||
+				ts.isMethodDeclaration(valDec)
 			) {
 				throw new CompilerError("Cannot index a function value!", node, CompilerErrorType.NoFunctionIndex);
-			} else if (ts.TypeGuards.isEnumDeclaration(valDec)) {
-				if (valDec.isConstEnum()) {
+			} else if (ts.isEnumDeclaration(valDec)) {
+				if (isConstEnum(valDec)) {
 					const value = valDec.getMemberOrThrow(propertyStr).getValue();
 					if (typeof value === "number") {
 						return `${value}`;
@@ -190,7 +191,7 @@ export function compilePropertyAccessExpression(state: CompilerState, node: ts.P
 						return '"' + sanitizeTemplate(value) + '"';
 					}
 				}
-			} else if (ts.TypeGuards.isClassDeclaration(valDec)) {
+			} else if (ts.isClassDeclaration(valDec)) {
 				if (propertyStr === "prototype") {
 					throw new CompilerError(
 						"Class prototypes are not supported!",
@@ -251,7 +252,7 @@ export function compileElementAccessBracketExpression(state: CompilerState, node
 	return getComputedPropertyAccess(
 		state,
 		skipNodesDownwards(node.getArgumentExpressionOrThrow()),
-		skipNodesDownwards(node.getExpression()),
+		skipNodesDownwards(node.expression),
 	);
 }
 
@@ -260,10 +261,10 @@ export function compileElementAccessDataTypeExpression(
 	node: ts.ElementAccessExpression,
 	expStr = "",
 ) {
-	const expNode = skipNodesDownwards(checkNonAny(node.getExpression()));
+	const expNode = skipNodesDownwards(checkNonAny(node.expression));
 
 	if (expStr === "") {
-		if (ts.TypeGuards.isCallExpression(expNode) && isTupleReturnTypeCall(expNode)) {
+		if (ts.isCallExpression(expNode) && isTupleReturnTypeCall(expNode)) {
 			expStr = compileCallExpression(state, expNode, true);
 			return (argExpStr: string) => (argExpStr === "1" ? `(${expStr})` : `(select(${argExpStr}, ${expStr}))`);
 		} else {

@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	checkReserved,
 	compileBindingPattern,
@@ -20,15 +20,16 @@ import {
 	isSetType,
 	isStringType,
 } from "../utility/type";
+import { getKindName, getName } from "../utility/ast";
 
 function getVariableName(state: CompilerState, lhs: ts.Node, statements: Array<string>) {
 	if (lhs) {
 		let varName = "";
 
-		if (ts.TypeGuards.isArrayBindingPattern(lhs) || ts.TypeGuards.isObjectBindingPattern(lhs)) {
+		if (ts.isArrayBindingPattern(lhs) || ts.isObjectBindingPattern(lhs)) {
 			varName = state.getNewId();
 			statements.push(...compileBindingPattern(state, lhs, varName));
-		} else if (ts.TypeGuards.isIdentifier(lhs)) {
+		} else if (ts.isIdentifier(lhs)) {
 			varName = checkReserved(lhs);
 		}
 
@@ -41,8 +42,8 @@ function getVariableName(state: CompilerState, lhs: ts.Node, statements: Array<s
 }
 
 function asDeclarationListOrThrow(initializer: ts.VariableDeclarationList | ts.Expression) {
-	if (!ts.TypeGuards.isVariableDeclarationList(initializer)) {
-		const initKindName = initializer.getKindName();
+	if (!ts.isVariableDeclarationList(initializer)) {
+		const initKindName = getKindName(initializer);
 		throw new CompilerError(
 			`ForOf Loop has an unexpected initializer! (${initKindName})`,
 			initializer,
@@ -81,15 +82,15 @@ enum ForOfLoopType {
 }
 
 function* propertyAccessExpressionTypeIter(state: CompilerState, exp: ts.Expression) {
-	while (ts.TypeGuards.isCallExpression(exp)) {
-		const subExp = skipNodesDownwards(exp.getExpression());
+	while (ts.isCallExpression(exp)) {
+		const subExp = skipNodesDownwards(exp.expression);
 
-		if (!ts.TypeGuards.isPropertyAccessExpression(subExp)) {
+		if (!ts.isPropertyAccessExpression(subExp)) {
 			break;
 		}
 
 		yield { exp: subExp, type: getPropertyAccessExpressionType(state, subExp) };
-		exp = skipNodesDownwards(subExp.getExpression());
+		exp = skipNodesDownwards(subExp.expression);
 	}
 }
 
@@ -99,7 +100,7 @@ function getLoopType(
 	reversed = false,
 	backwards = false,
 ): [ts.Expression, ForOfLoopType, boolean, boolean] {
-	const exp = skipNodesDownwards(node.getExpression());
+	const exp = skipNodesDownwards(node.expression);
 	const expType = getType(exp);
 	const iter = propertyAccessExpressionTypeIter(state, exp);
 	let data = iter.next();
@@ -108,9 +109,9 @@ function getLoopType(
 		let subExp = data.value.exp;
 		switch (data.value.type) {
 			case PropertyCallExpType.ObjectConstructor: {
-				const iterExp = skipNodesDownwards((exp as ts.CallExpression).getArguments()[0] as ts.Expression);
+				const iterExp = skipNodesDownwards((exp as ts.CallExpression).arguments[0] as ts.Expression);
 
-				switch (subExp.getName()) {
+				switch (getName(subExp)) {
 					case "keys":
 						return [iterExp, ForOfLoopType.Keys, reversed, backwards];
 					case "entries":
@@ -121,7 +122,7 @@ function getLoopType(
 				break;
 			}
 			case PropertyCallExpType.Array: {
-				switch (subExp.getName()) {
+				switch (getName(subExp)) {
 					case "entries": {
 						do {
 							subExp = data.value.exp;
@@ -129,11 +130,11 @@ function getLoopType(
 							data = iter.next();
 						} while (
 							!data.done &&
-							(data.value.type === PropertyCallExpType.Array && data.value.exp.getName() === "reverse")
+							(data.value.type === PropertyCallExpType.Array && data.value.getName(exp) === "reverse")
 						);
 
 						return [
-							skipNodesDownwards(subExp.getExpression()),
+							skipNodesDownwards(subExp.expression),
 							ForOfLoopType.ArrayEntries,
 							!reversed,
 							backwards,
@@ -153,7 +154,7 @@ function getLoopType(
 								return [lowerExp, lowerLoopExpType, isReversed, isBackwards];
 						}
 
-						return [skipNodesDownwards(subExp.getExpression()), ForOfLoopType.Array, reversed, !backwards];
+						return [skipNodesDownwards(subExp.expression), ForOfLoopType.Array, reversed, !backwards];
 					}
 				}
 				break;
@@ -184,11 +185,11 @@ function getLoopType(
 export function compileForOfStatement(state: CompilerState, node: ts.ForOfStatement) {
 	state.enterPrecedingStatementContext();
 
-	const initializer = asDeclarationListOrThrow(node.getInitializer());
+	const initializer = asDeclarationListOrThrow(node.initializer);
 	const declaration = getSingleDeclarationOrThrow(initializer);
-	const statement = node.getStatement();
+	const statement = node.statement;
 	const [exp, loopType, isReversed, isBackwards] = getLoopType(state, node);
-	const lhs = declaration.getNameNode();
+	const lhs = declaration.name;
 	let varName: string;
 
 	/** The key to be used in the for loop. If it is the empty string, it is irrelevant. */
@@ -218,27 +219,27 @@ export function compileForOfStatement(state: CompilerState, node: ts.ForOfStatem
 			expStr = `pairs(${expStr})`;
 		}
 
-		if (ts.TypeGuards.isArrayBindingPattern(lhs)) {
-			const elements = lhs.getElements();
+		if (ts.isArrayBindingPattern(lhs)) {
+			const elements = lhs.elements;
 			const [first, second] = elements as [
 				ts.BindingElement | ts.OmittedExpression | undefined,
 				ts.BindingElement | ts.OmittedExpression | undefined,
 			];
 
-			if (first && ts.TypeGuards.isBindingElement(first)) {
-				key = getVariableName(state, first.getNameNode(), statements);
+			if (first && ts.isBindingElement(first)) {
+				key = getVariableName(state, first.name, statements);
 			}
 
-			if (second && ts.TypeGuards.isBindingElement(second)) {
-				value = getVariableName(state, second.getNameNode(), statements);
+			if (second && ts.isBindingElement(second)) {
+				value = getVariableName(state, second.name, statements);
 			}
 
 			for (let i = 2, { length } = elements; i < length; i++) {
 				const { [i]: element } = elements;
 
 				extraParams.push(
-					ts.TypeGuards.isBindingElement(element)
-						? getVariableName(state, element.getNameNode(), statements)
+					ts.isBindingElement(element)
+						? getVariableName(state, element.name, statements)
 						: "_",
 				);
 			}
@@ -251,7 +252,7 @@ export function compileForOfStatement(state: CompilerState, node: ts.ForOfStatem
 				);
 			}
 
-			if (!ts.TypeGuards.isIdentifier(lhs)) {
+			if (!ts.isIdentifier(lhs)) {
 				throw new CompilerError("Unexpected for..of initializer", lhs, CompilerErrorType.BadForOfInitializer);
 			}
 			key = state.getNewId();

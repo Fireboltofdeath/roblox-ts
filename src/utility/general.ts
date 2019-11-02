@@ -1,7 +1,7 @@
 import { SpawnOptions } from "child_process";
 import spawn from "cross-spawn";
 import path from "path";
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { isValidLuaIdentifier } from "../compiler";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -161,10 +161,10 @@ export function getScriptContext(file: ts.SourceFile, seen = new Set<string>()):
 }
 
 export function isIdentifierWhoseDefinitionMatchesNode(
-	node: ts.Node<ts.ts.Node>,
+	node: ts.Node,
 	potentialDefinition: ts.Identifier,
 ): node is ts.Identifier {
-	if (ts.TypeGuards.isIdentifier(node)) {
+	if (ts.isIdentifier(node)) {
 		for (const def of node.getDefinitions()) {
 			if (def.getNode() === potentialDefinition) {
 				return true;
@@ -182,11 +182,11 @@ export function skipNodesDownwards<T extends ts.Node>(exp?: T, dontSkipParenthes
 export function skipNodesDownwards<T extends ts.Node>(exp?: T, dontSkipParenthesis?: boolean) {
 	if (exp) {
 		while (
-			(!dontSkipParenthesis && ts.TypeGuards.isParenthesizedExpression(exp)) ||
-			ts.TypeGuards.isNonNullExpression(exp) ||
-			ts.TypeGuards.isAsExpression(exp)
+			(!dontSkipParenthesis && ts.isParenthesizedExpression(exp)) ||
+			ts.isNonNullExpression(exp) ||
+			ts.isAsExpression(exp)
 		) {
-			exp = (exp.getExpression() as unknown) as T;
+			exp = (exp.expression as unknown) as T;
 		}
 		return exp;
 	}
@@ -201,11 +201,11 @@ export function skipNodesUpwards<T extends ts.Node>(exp?: T, dontSkipParenthesis
 	if (exp) {
 		while (
 			exp &&
-			((!dontSkipParenthesis && ts.TypeGuards.isParenthesizedExpression(exp)) ||
-				ts.TypeGuards.isNonNullExpression(exp) ||
-				ts.TypeGuards.isAsExpression(exp))
+			((!dontSkipParenthesis && ts.isParenthesizedExpression(exp)) ||
+				ts.isNonNullExpression(exp) ||
+				ts.isAsExpression(exp))
 		) {
-			exp = (exp.getParent() as unknown) as T;
+			exp = (exp.parent as unknown) as T;
 		}
 		return exp;
 	}
@@ -215,16 +215,16 @@ export function skipNodesUpwards<T extends ts.Node>(exp?: T, dontSkipParenthesis
  * Be aware that this can change the type of your expression.
  */
 export function skipNodesUpwardsLookAhead(node: ts.Node) {
-	let parent = node.getParent();
+	let parent = node.parent;
 
 	while (
 		parent &&
-		(ts.TypeGuards.isNonNullExpression(parent) ||
-			ts.TypeGuards.isParenthesizedExpression(parent) ||
-			ts.TypeGuards.isAsExpression(parent))
+		(ts.isNonNullExpression(parent) ||
+			ts.isParenthesizedExpression(parent) ||
+			ts.isAsExpression(parent))
 	) {
 		node = parent;
-		parent = node.getParent();
+		parent = node.parent;
 	}
 
 	return node;

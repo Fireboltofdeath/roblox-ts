@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { checkNonAny, compileCallExpression, compileExpression, getReadableExpressionName } from ".";
 import { CompilerState, PrecedingStatementContext } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -15,10 +15,10 @@ import {
 	shouldPushToPrecedingStatement,
 } from "../utility/type";
 
-export function shouldCompileAsSpreadableList(elements: Array<ts.Expression>) {
+export function shouldCompileAsSpreadableList(elements: ts.NodeArray<ts.Expression>) {
 	const { length } = elements;
 	for (let i = 0; i < length; i++) {
-		if (ts.TypeGuards.isSpreadElement(elements[i])) {
+		if (ts.isSpreadElement(elements[i])) {
 			return i + 1 !== length;
 		}
 	}
@@ -27,22 +27,22 @@ export function shouldCompileAsSpreadableList(elements: Array<ts.Expression>) {
 
 export function compileSpreadableList(
 	state: CompilerState,
-	elements: Array<ts.Expression>,
+	elements: ts.NodeArray<ts.Expression>,
 	compile: (state: CompilerState, expression: ts.Expression) => string = compileExpression,
 ) {
 	// The logic here is equivalent to the compileList logic, although it looks a bit more complicated
 	let isInArray = false;
 	const parts = new Array<Array<string> | string>();
 	const contexts = new Array<Array<PrecedingStatementContext> | PrecedingStatementContext>();
-	const args = new Array<Array<ts.Expression> | ts.Expression>();
+	const args = new Array<ts.NodeArray<ts.Expression> | ts.Expression>();
 	let gIndex = 0;
 	let lastContextualIndex: number | undefined;
 	let lastContextualElement: ts.Expression | undefined;
 
 	for (const element of elements) {
-		if (ts.TypeGuards.isSpreadElement(element)) {
+		if (ts.isSpreadElement(element)) {
 			state.enterPrecedingStatementContext();
-			const expStr = compileSpreadExpressionOrThrow(state, skipNodesDownwards(element.getExpression()));
+			const expStr = compileSpreadExpressionOrThrow(state, skipNodesDownwards(element.expression));
 			const context = state.exitPrecedingStatementContext() as PrecedingStatementContext;
 
 			if (context.length > 0) {
@@ -163,7 +163,7 @@ export function compileSpreadableList(
 
 export function compileSpreadableListAndJoin(
 	state: CompilerState,
-	elements: Array<ts.Expression>,
+	elements: ts.NodeArray<ts.Expression>,
 	shouldWrapInConcat: boolean = true,
 	compile: (state: CompilerState, expression: ts.Expression) => string = compileExpression,
 ) {
@@ -197,7 +197,7 @@ export function compileSpreadExpression(state: CompilerState, expression: ts.Exp
 	} else if (isArrayType(expType)) {
 		return compileExpression(state, expression);
 	} else if (isStringType(expType)) {
-		if (ts.TypeGuards.isStringLiteral(expression)) {
+		if (ts.isStringLiteral(expression)) {
 			const text = expression.getText();
 			const quote = text.slice(-1);
 			const segments = text.slice(1, -1).match(/\\?(\r\n|[^])/gu);
@@ -233,10 +233,10 @@ export function compileSpreadExpressionOrThrow(state: CompilerState, expression:
 }
 
 export function compileSpreadElement(state: CompilerState, node: ts.SpreadElement) {
-	const expression = node.getExpression();
+	const expression = node.expression;
 	checkNonAny(expression, true);
 
-	if (ts.TypeGuards.isCallExpression(expression) && isTupleReturnTypeCall(expression)) {
+	if (ts.isCallExpression(expression) && isTupleReturnTypeCall(expression)) {
 		return compileCallExpression(state, expression, true);
 	} else {
 		return `unpack(${compileSpreadExpressionOrThrow(state, expression)})`;

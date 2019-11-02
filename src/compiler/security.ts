@@ -1,10 +1,11 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { HasParameters } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { ScriptContext } from "../utility/general";
 import { bold, yellow } from "../utility/text";
 import { getType, isAnyType } from "../utility/type";
+import { getFirstAncestorByKind } from "../utility/ast";
 
 const LUA_RESERVED_METAMETHODS = new Set([
 	"__index",
@@ -176,7 +177,7 @@ function getCompilerDirectiveFromDeclaration(
 	node: ts.Node,
 	directives: Array<CompilerDirective>,
 ): CompilerDirective | undefined {
-	if (ts.TypeGuards.isJSDocableNode(node)) {
+	if (ts.isJSDocableNode(node)) {
 		for (const jsDoc of node.getJsDocs()) {
 			for (const jsTag of jsDoc.getTags()) {
 				// TODO: remove this when ts-morph is fixed
@@ -195,7 +196,7 @@ function getCompilerDirectiveFromDeclaration(
 			}
 		}
 	}
-	const parent = node.getParent();
+	const parent = node.parent;
 	if (parent) {
 		const result = getCompilerDirectiveFromDeclaration(parent, directives);
 		if (result !== undefined) {
@@ -256,7 +257,7 @@ export function checkApiAccess(state: CompilerState, node: ts.Node) {
 }
 
 export function checkNonAny<T extends ts.Node>(node: T, checkArrayType = false): T {
-	const isInCatch = node.getFirstAncestorByKind(ts.SyntaxKind.CatchClause) !== undefined;
+	const isInCatch = getFirstAncestorByKind(node, ts.SyntaxKind.CatchClause) !== undefined;
 	let type = getType(node);
 	if (checkArrayType && type.isArray()) {
 		const arrayType = type.getArrayElementType();
@@ -265,7 +266,7 @@ export function checkNonAny<T extends ts.Node>(node: T, checkArrayType = false):
 		}
 	}
 	if (!isInCatch && isAnyType(type)) {
-		const parent = node.getParent();
+		const parent = node.parent;
 		if (parent) {
 			throw new CompilerError(
 				`${yellow(node.getText())} in ${yellow(parent.getText())} is of type ${bold(
@@ -288,7 +289,7 @@ export function checkNonAny<T extends ts.Node>(node: T, checkArrayType = false):
 }
 
 export function checkReturnsNonAny(node: HasParameters) {
-	const isInCatch = node.getFirstAncestorByKind(ts.SyntaxKind.CatchClause) !== undefined;
+	const isInCatch = getFirstAncestorByKind(node, ts.SyntaxKind.CatchClause) !== undefined;
 	if (!isInCatch && isAnyType(node.getReturnType())) {
 		throw new CompilerError(
 			`Functions with a return type of type ${bold("any")} are unsupported! Use type ${bold("unknown")} instead!`,

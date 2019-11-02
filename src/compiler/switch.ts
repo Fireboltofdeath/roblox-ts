@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, compileStatementedNode, isIdentifierDefinedInConst, shouldWrapExpression } from ".";
 import { CompilerState, PrecedingStatementContext } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -33,7 +33,7 @@ export function compileSwitchStatement(state: CompilerState, node: ts.SwitchStat
 	let preResult = "";
 	let expStr: string;
 
-	const expression = skipNodesDownwards(node.getExpression());
+	const expression = skipNodesDownwards(node.expression);
 	state.enterPrecedingStatementContext();
 	const rawExpStr = compileExpression(state, expression);
 	const expressionContext = state.exitPrecedingStatementContext();
@@ -45,7 +45,7 @@ export function compileSwitchStatement(state: CompilerState, node: ts.SwitchStat
 
 	if (
 		(hasPrecedingStatements && expressionContext.isPushed) ||
-		(ts.TypeGuards.isIdentifier(expression) && isIdentifierDefinedInConst(expression))
+		(ts.isIdentifier(expression) && isIdentifierDefinedInConst(expression))
 	) {
 		expStr = rawExpStr;
 	} else {
@@ -67,27 +67,27 @@ export function compileSwitchStatement(state: CompilerState, node: ts.SwitchStat
 	const lastClauseIndex = clauses.length - 1;
 	const lastClause = clauses[lastClauseIndex];
 	const lastNonDefaultClauseIndex =
-		clauses.length - 1 - [...clauses].reverse().findIndex(clause => ts.TypeGuards.isCaseClause(clause));
+		clauses.length - 1 - [...clauses].reverse().findIndex(clause => ts.isCaseClause(clause));
 
 	if (lastClause) {
-		const hasDefault = !ts.TypeGuards.isCaseClause(lastClause);
+		const hasDefault = !ts.isCaseClause(lastClause);
 		let fallThroughConditions = new Array<string>();
 
 		for (let i = 0; i < clauses.length; i++) {
 			const clause = clauses[i];
-			const statements = clause.getStatements();
+			const statements = clause.statements;
 			let writeThatWeFellThrough = true;
 
 			let lastStatement = statements[statements.length - 1];
 			let blockStatements = statements;
-			while (lastStatement && ts.TypeGuards.isBlock(lastStatement)) {
-				blockStatements = lastStatement.getStatements();
+			while (lastStatement && ts.isBlock(lastStatement)) {
+				blockStatements = lastStatement.statements;
 				lastStatement = blockStatements[blockStatements.length - 1];
 			}
 
 			// Returns/Breaks are not always the last statement. Unreachable code is valid TS
 			const endsInReturnOrBreakStatement = blockStatements.find(
-				statement => ts.TypeGuards.isBreakStatement(statement) || ts.TypeGuards.isReturnStatement(statement),
+				statement => ts.isBreakStatement(statement) || ts.isReturnStatement(statement),
 			);
 
 			const hasStatements = statements.length > 0;
@@ -100,10 +100,10 @@ export function compileSwitchStatement(state: CompilerState, node: ts.SwitchStat
 
 			// add if statement if the clause is non-default
 			let isNonDefault = false;
-			if (ts.TypeGuards.isCaseClause(clause)) {
+			if (ts.isCaseClause(clause)) {
 				isNonDefault = true;
 				state.enterPrecedingStatementContext();
-				const clauseExp = clause.getExpression();
+				const clauseExp = clause.expression;
 				let clauseExpStr = compileExpression(state, clauseExp);
 				if (shouldWrapExpression(clauseExp, false)) {
 					clauseExpStr = `(${clauseExpStr})`;
@@ -166,7 +166,7 @@ export function compileSwitchStatement(state: CompilerState, node: ts.SwitchStat
 						result +=
 							state.indent +
 							`${
-								fellThroughFirstHere && !wroteFallThrough ? "local " : ""
+							fellThroughFirstHere && !wroteFallThrough ? "local " : ""
 							}${fallThroughVar} = ${condition};\n`;
 
 						if (indent === 1) {

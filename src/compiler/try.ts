@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, compileStatementedNode } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -7,7 +7,7 @@ import { getType, isStringType } from "../utility/type";
 import { checkReserved } from "./security";
 
 export function compileThrowStatement(state: CompilerState, node: ts.ThrowStatement) {
-	const expression = skipNodesDownwards(node.getExpression());
+	const expression = skipNodesDownwards(node.expression);
 	if (!expression || !isStringType(getType(expression))) {
 		throw new CompilerError("Non-string throws are not supported!", node, CompilerErrorType.NonStringThrow);
 	}
@@ -20,7 +20,7 @@ export function compileTryStatement(state: CompilerState, node: ts.TryStatement)
 	const tryBlock = node.getTryBlock();
 	const returnStatement = tryBlock
 		.getDescendantStatements()
-		.find(statement => ts.TypeGuards.isReturnStatement(statement));
+		.find(statement => ts.isReturnStatement(statement));
 	if (returnStatement) {
 		throw new CompilerError(
 			"Try blocks cannot have return statements!",
@@ -60,7 +60,7 @@ export function compileTryStatement(state: CompilerState, node: ts.TryStatement)
 		result += state.indent + `if not ${successId} then\n`;
 		state.pushIndent();
 		if (hasErrVar) {
-			const variableDeclaration = catchClause.getVariableDeclarationOrThrow().getNameNode();
+			const variableDeclaration = catchClause.getVariableDeclarationOrThrow().name;
 			const varName = checkReserved(variableDeclaration);
 			result += state.indent + `local ${varName} = ${errMsgId};\n`;
 		}

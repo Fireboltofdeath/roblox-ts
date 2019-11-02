@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, compileList } from ".";
 import { CompilerState } from "../CompilerState";
 import { skipNodesDownwards } from "../utility/general";
@@ -24,7 +24,7 @@ function getTemplateParts(
 	node: ts.TemplateExpression | ts.NoSubstitutionTemplateLiteral,
 	tostring: boolean,
 ): TemplateParts {
-	if (ts.TypeGuards.isNoSubstitutionTemplateLiteral(node)) {
+	if (ts.isNoSubstitutionTemplateLiteral(node)) {
 		return {
 			expressions: [],
 			literals: [wrapQuotes(sanitizeTemplate(node.getText().slice(1, -1)))],
@@ -45,14 +45,14 @@ function getTemplateParts(
 			const literal = span.getLiteral();
 			literals.push(
 				wrapQuotes(
-					sanitizeTemplate(literal.getText().slice(1, ts.TypeGuards.isTemplateMiddle(literal) ? -2 : -1)),
+					sanitizeTemplate(literal.getText().slice(1, ts.isTemplateMiddle(literal) ? -2 : -1)),
 				),
 			);
 		}
 
 		const expressions = compileList(
 			state,
-			node.getTemplateSpans().map(span => skipNodesDownwards(span.getExpression())),
+			node.getTemplateSpans().map(span => skipNodesDownwards(span.expression)),
 			(_, exp) => {
 				const expStr = compileExpression(state, exp);
 				if (tostring) {

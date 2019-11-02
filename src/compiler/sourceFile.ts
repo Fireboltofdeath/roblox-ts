@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileStatementedNode } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
@@ -73,7 +73,7 @@ export function compileSourceFile(state: CompilerState, node: ts.SourceFile) {
 		let hasExportEquals = false;
 		for (const descendant of node.getDescendantsOfKind(ts.SyntaxKind.ExportAssignment)) {
 			/* istanbul ignore else */
-			if (descendant.isExportEquals()) {
+			if (descendant.isExportEquals) {
 				hasExportEquals = true;
 				break;
 			}

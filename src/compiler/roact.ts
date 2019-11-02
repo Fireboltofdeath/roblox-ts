@@ -1,10 +1,11 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { skipNodesDownwards } from "../utility/general";
 import { bold, suggest } from "../utility/text";
 import { getType, isArrayType, isMapType } from "../utility/type";
+import { getKindName, isThisExpression } from "../utility/ast";
 
 const ROACT_ELEMENT_TYPE = "Roact.Element";
 export const ROACT_COMPONENT_TYPE = "Roact.Component";
@@ -13,7 +14,7 @@ const ROACT_FRAGMENT_TYPE = "Roact.Fragment";
 
 export const ROACT_DERIVED_CLASSES_ERROR = suggest(
 	"Composition is preferred over inheritance with Roact components.\n" +
-		"...\tsee https://reactjs.org/docs/composition-vs-inheritance.html for more info about composition over inheritance.",
+	"...\tsee https://reactjs.org/docs/composition-vs-inheritance.html for more info about composition over inheritance.",
 );
 const CONSTRUCTOR_METHOD_NAME = "init";
 const INHERITANCE_METHOD_NAME = "extend";
@@ -39,8 +40,8 @@ function isRoactElementType(type: ts.Type, allowsUndefined: boolean = true) {
  * @param node The conditional expression
  */
 function isValidRoactConditionalExpression(node: ts.ConditionalExpression) {
-	const ifTrue = node.getWhenTrue();
-	const ifFalse = node.getWhenFalse();
+	const ifTrue = node.whenTrue;
+	const ifFalse = node.whenFalse;
 	return isRoactElementType(ifTrue.getType()) && isRoactElementType(ifFalse.getType());
 }
 
@@ -49,7 +50,7 @@ function isValidRoactConditionalExpression(node: ts.ConditionalExpression) {
  * @param node The binary expression
  */
 function isValidRoactBinaryExpression(node: ts.BinaryExpression) {
-	const rawRhs = node.getRight();
+	const rawRhs = node.right;
 
 	return isRoactElementType(rawRhs.getType());
 }
@@ -165,7 +166,7 @@ export function inheritsFromRoact(type: ts.Type): boolean {
 export function getRoactType(classNode: ts.ClassDeclaration | ts.ClassExpression) {
 	const extendsExp = classNode.getExtends();
 	if (extendsExp) {
-		const extendsText = skipNodesDownwards(extendsExp.getExpression()).getText();
+		const extendsText = skipNodesDownwards(extendsExp.expression).getText();
 		if (extendsText.startsWith(ROACT_COMPONENT_TYPE)) {
 			return ROACT_COMPONENT_TYPE;
 		} else if (extendsText.startsWith(ROACT_PURE_COMPONENT_TYPE)) {
@@ -184,8 +185,8 @@ export function inheritsFromRoactComponent(classNode: ts.ClassDeclaration | ts.C
 	if (extendsExp) {
 		const symbol = extendsExp.getType().getSymbol();
 		if (symbol) {
-			const valueDec = symbol.getValueDeclaration();
-			if (valueDec && (ts.TypeGuards.isClassDeclaration(valueDec) || ts.TypeGuards.isClassExpression(valueDec))) {
+			const valueDec = symbol.valueDeclaration;
+			if (valueDec && (ts.isClassDeclaration(valueDec) || ts.isClassExpression(valueDec))) {
 				if (getRoactType(classNode) !== undefined) {
 					return true;
 				} else {
@@ -236,17 +237,17 @@ export function checkRoactReserved(className: string, name: string, node: ts.Nod
  */
 function compileSymbolPropertyCallback(state: CompilerState, expression: ts.Expression) {
 	const symbol = expression.getSymbolOrThrow();
-	const name = symbol.getName();
+	const name = getName(symbol);
 	const value = symbol.getValueDeclarationOrThrow();
 
-	if (ts.TypeGuards.isFunctionLikeDeclaration(value)) {
-		if (ts.TypeGuards.isMethodDeclaration(value)) {
+	if (ts.isFunctionLikeDeclaration(value)) {
+		if (ts.isMethodDeclaration(value)) {
 			throw new CompilerError(
 				"Do not use Method signatures directly as callbacks for Roact Event, Changed or Ref.\n" +
-					suggest(
-						`Change the declaration of \`${name}(...) {...}\` to \`${name} = () => { ... }\`, ` +
-							` or use an arrow function: \`() => { this.${name}() }\``,
-					),
+				suggest(
+					`Change the declaration of \`${name}(...) {...}\` to \`${name} = () => { ... }\`, ` +
+					` or use an arrow function: \`() => { this.${name}() }\``,
+				),
 				expression,
 				CompilerErrorType.RoactInvalidCallExpression,
 			);
@@ -296,7 +297,7 @@ function compileRoactJsxCallExpression(state: CompilerState, expression: ts.Call
  * @param expression The expression
  */
 function compileRoactJsxExpression(state: CompilerState, expression: ts.Expression): string {
-	if (ts.TypeGuards.isCallExpression(expression)) {
+	if (ts.isCallExpression(expression)) {
 		const returnType = expression.getReturnType();
 
 		// If returns Roact.Element or Roact.Element[]
@@ -313,7 +314,7 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 				CompilerErrorType.RoactInvalidCallExpression,
 			);
 		}
-	} else if (ts.TypeGuards.isIdentifier(expression)) {
+	} else if (ts.isIdentifier(expression)) {
 		const definitionNodes = expression.getDefinitionNodes();
 		for (const definitionNode of definitionNodes) {
 			const type = getType(definitionNode);
@@ -331,8 +332,8 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 		/* istanbul ignore next */
 		return "";
 	} else if (
-		ts.TypeGuards.isPropertyAccessExpression(expression) ||
-		ts.TypeGuards.isElementAccessExpression(expression)
+		ts.isPropertyAccessExpression(expression) ||
+		ts.isElementAccessExpression(expression)
 	) {
 		const propertyType = getType(expression);
 
@@ -345,19 +346,19 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 				CompilerErrorType.RoactInvalidPropertyExpression,
 			);
 		}
-	} else if (ts.TypeGuards.isBinaryExpression(expression)) {
+	} else if (ts.isBinaryExpression(expression)) {
 		if (isValidRoactBinaryExpression(expression)) {
 			state.enterPrecedingStatementContext();
 
-			const lhs = expression.getLeft();
-			const rhs = expression.getRight();
+			const lhs = expression.left;
+			const rhs = expression.right;
 			state.roactElementStack.push("BinaryExpression");
 			const result = compileExpression(state, lhs) + " and " + compileExpression(state, rhs) + " or nil";
 			state.roactElementStack.pop();
 			return state.indent + "{ " + state.exitPrecedingStatementContextAndJoin() + result + " }";
 		} else {
 			const right = expression
-				.getRight()
+				.right
 				.getType()
 				.getText();
 			throw new CompilerError(
@@ -366,7 +367,7 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 				CompilerErrorType.RoactInvalidExpression,
 			);
 		}
-	} else if (ts.TypeGuards.isConditionalExpression(expression)) {
+	} else if (ts.isConditionalExpression(expression)) {
 		if (isValidRoactConditionalExpression(expression)) {
 			state.roactElementStack.push("ConditionalExpression");
 			const result = state.indent + compileExpression(state, expression);
@@ -381,7 +382,7 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 				CompilerErrorType.RoactInvalidExpression,
 			);
 		}
-	} else if (ts.TypeGuards.isJsxSelfClosingElement(expression) || ts.TypeGuards.isJsxElement(expression)) {
+	} else if (ts.isJsxSelfClosingElement(expression) || ts.isJsxElement(expression)) {
 		let str = state.indent + "{\n";
 		state.pushIndent();
 		str += state.indent + compileExpression(state, expression);
@@ -391,7 +392,7 @@ function compileRoactJsxExpression(state: CompilerState, expression: ts.Expressi
 	} else {
 		throw new CompilerError(
 			`Roact does not support this type of expression ` +
-				`{${expression.getText()}} (${expression.getKindName()})`,
+			`{${expression.getText()}} (${getKindName(expression)})`,
 			expression,
 			CompilerErrorType.RoactInvalidExpression,
 		);
@@ -412,7 +413,7 @@ function generateRoactAttributes(state: CompilerState, attributesCollection: Arr
 
 	// Check to see if we should use Roact_combine for the attributes
 	for (const attributeLike of attributesCollection) {
-		if (ts.TypeGuards.isJsxSpreadAttribute(attributeLike)) {
+		if (ts.isJsxSpreadAttribute(attributeLike)) {
 			useRoactCombine = true;
 		}
 	}
@@ -420,13 +421,13 @@ function generateRoactAttributes(state: CompilerState, attributesCollection: Arr
 	state.pushIndent();
 
 	for (const attributeLike of attributesCollection) {
-		if (ts.TypeGuards.isJsxSpreadAttribute(attributeLike)) {
+		if (ts.isJsxSpreadAttribute(attributeLike)) {
 			if (attributeStack.length > 0) {
 				attributeCombineStack.push(state.indent + joinAndWrapInTable(state, attributeStack));
 				attributeStack = new Array<string>();
 			}
 
-			const expression = attributeLike.getExpression();
+			const expression = attributeLike.expression;
 			attributeCombineStack.push(state.indent + compileExpression(state, expression));
 		} else {
 			if (useRoactCombine) {
@@ -434,13 +435,13 @@ function generateRoactAttributes(state: CompilerState, attributesCollection: Arr
 			}
 
 			const attribute = attributeLike as ts.JsxAttribute;
-			const attributeName = attribute.getName();
+			const attributeName = getName(attribute);
 			const attributeType = attribute.getType();
 
 			let value;
 			if (attributeType.isBooleanLiteral()) {
 				// Allow <Component BooleanValue/> (implicit form of <Component BooleanValue={true}/>)
-				const initializer = attribute.getInitializer();
+				const initializer = attribute.initializer;
 				value = initializer ? compileExpression(state, initializer) : attributeType.getText();
 			} else {
 				value = compileExpression(state, attribute.getInitializerOrThrow());
@@ -488,12 +489,12 @@ function getInlineObjectProperties(
 	attributesStack: Array<string>,
 ) {
 	for (const property of properties) {
-		if (ts.TypeGuards.isPropertyAssignment(property) || ts.TypeGuards.isShorthandPropertyAssignment(property)) {
-			const propName = property.getName();
+		if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+			const propName = getName(property);
 			const rhs = property.getInitializerOrThrow();
 			let value: string;
 
-			if (ts.TypeGuards.isPropertyAccessExpression(rhs)) {
+			if (ts.isPropertyAccessExpression(rhs)) {
 				value = compileSymbolPropertyCallback(state, rhs);
 			} else {
 				value = compileExpression(state, rhs);
@@ -515,18 +516,18 @@ function getIdentifierObjectProperties(
 		const literalExpressions = definitionNode.getChildrenOfKind(ts.SyntaxKind.ObjectLiteralExpression);
 		if (literalExpressions.length > 0) {
 			for (const literalExpression of literalExpressions) {
-				for (const property of literalExpression.getProperties()) {
+				for (const property of literalExpression.properties) {
 					if (
-						ts.TypeGuards.isPropertyAssignment(property) ||
-						ts.TypeGuards.isShorthandPropertyAssignment(property)
+						ts.isPropertyAssignment(property) ||
+						ts.isShorthandPropertyAssignment(property)
 					) {
-						const propName = property.getName();
+						const propName = getName(property);
 						attributesStack.push(
 							state.indent +
-								`[Roact.${toTitle(roactSymbol)}.${propName}] = ${compileExpression(
-									state,
-									identifier,
-								)}.${propName}`,
+							`[Roact.${toTitle(roactSymbol)}.${propName}] = ${compileExpression(
+								state,
+								identifier,
+							)}.${propName}`,
 						);
 					}
 				}
@@ -559,14 +560,14 @@ export function generateRoactSymbolAttribute(
 			roactSymbol === "Event" ||
 			roactSymbol === "Change"
 		) {
-			if (ts.TypeGuards.isObjectLiteralExpression(innerExpression)) {
-				const properties = innerExpression.getProperties();
+			if (ts.isObjectLiteralExpression(innerExpression)) {
+				const properties = innerExpression.properties;
 				getInlineObjectProperties(state, roactSymbol, properties, attributesStack);
-			} else if (ts.TypeGuards.isIdentifier(innerExpression)) {
+			} else if (ts.isIdentifier(innerExpression)) {
 				getIdentifierObjectProperties(state, roactSymbol, innerExpression, attributesStack);
 			} else {
 				throw new CompilerError(
-					`Invalid value supplied to ${roactSymbol} ${innerExpression.getKindName()}`,
+					`Invalid value supplied to ${roactSymbol} ${getKindName(innerExpression)}`,
 					attributeNode,
 					CompilerErrorType.RoactInvalidSymbol,
 				);
@@ -574,9 +575,9 @@ export function generateRoactSymbolAttribute(
 		} else if (roactSymbol === "ref" || roactSymbol === "Ref") {
 			let value: string;
 
-			if (ts.TypeGuards.isPropertyAccessExpression(innerExpression)) {
-				const getAccessExpression = innerExpression.getExpression();
-				if (ts.TypeGuards.isThisExpression(getAccessExpression)) {
+			if (ts.isPropertyAccessExpression(innerExpression)) {
+				const getAccessExpression = innerExpression.expression;
+				if (isThisExpression(getAccessExpression)) {
 					value = compileSymbolPropertyCallback(state, innerExpression);
 				} else {
 					value = compileExpression(state, getAccessExpression);
@@ -588,7 +589,7 @@ export function generateRoactSymbolAttribute(
 			attributesStack.push(state.indent + `[Roact.Ref] = ${value}`);
 		} else {
 			throw new CompilerError(
-				`Roact symbol ${roactSymbol} does not support (${innerExpression.getKindName()})`,
+				`Roact symbol ${roactSymbol} does not support (${getKindName(innerExpression)})`,
 				attributeNode,
 				CompilerErrorType.RoactInvalidSymbol,
 			);
@@ -609,7 +610,7 @@ function generateRoactChildren(state: CompilerState, isFragment: boolean, childC
 
 	let useRoactCombine = false;
 	for (const child of childCollection) {
-		if (ts.TypeGuards.isJsxExpression(child)) {
+		if (ts.isJsxExpression(child)) {
 			useRoactCombine = true;
 		}
 	}
@@ -617,7 +618,7 @@ function generateRoactChildren(state: CompilerState, isFragment: boolean, childC
 	state.pushIndent();
 
 	for (const child of childCollection) {
-		if (ts.TypeGuards.isJsxElement(child) || ts.TypeGuards.isJsxSelfClosingElement(child)) {
+		if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)) {
 			if (useRoactCombine) {
 				state.pushIndent();
 			}
@@ -628,18 +629,18 @@ function generateRoactChildren(state: CompilerState, isFragment: boolean, childC
 			if (useRoactCombine) {
 				state.popIndent();
 			}
-		} else if (ts.TypeGuards.isJsxExpression(child)) {
+		} else if (ts.isJsxExpression(child)) {
 			if (childStack.length > 0) {
 				roactCombineStack.push(state.indent + joinAndWrapInTable(state, childStack));
 				childStack = new Array();
 			}
 
 			// If there's no expression, it will be a comment.
-			const expression = child.getExpression();
+			const expression = child.expression;
 			if (expression) {
 				roactCombineStack.push(compileRoactJsxExpression(state, expression));
 			}
-		} else if (ts.TypeGuards.isJsxText(child)) {
+		} else if (ts.isJsxText(child)) {
 			if (child.getText().match(/[^\s]/)) {
 				throw new CompilerError(
 					"Roact does not support text!",
@@ -708,8 +709,8 @@ function generateRoactElement(
 			/* istanbul ignore next */
 			throw new CompilerError(
 				`"${bold(jsxName)}" is an intrinsic-like identifier,` +
-					`but there is no matching RbxJsxIntrinsicProps type for it.\n` +
-					suggest("If you get this message, file an issue."),
+				`but there is no matching RbxJsxIntrinsicProps type for it.\n` +
+				suggest("If you get this message, file an issue."),
 				nameNode,
 				CompilerErrorType.RoactInvalidPrimitive,
 			);
@@ -796,7 +797,7 @@ export function compileJsxElement(state: CompilerState, node: ts.JsxElement): st
 		/* istanbul ignore next */
 		throw new CompilerError(
 			"Cannot use JSX without importing Roact first!\n" +
-				suggest('To fix this, put `import Roact from "@rbxts/roact"` at the top of this file.'),
+			suggest('To fix this, put `import Roact from "@rbxts/roact"` at the top of this file.'),
 			node,
 			CompilerErrorType.RoactJsxWithoutImport,
 		);
@@ -817,14 +818,14 @@ export function compileJsxSelfClosingElement(state: CompilerState, node: ts.JsxS
 		/* istanbul ignore next */
 		throw new CompilerError(
 			"Cannot use JSX without importing Roact first!\n" +
-				suggest('To fix this, put `import Roact from "@rbxts/roact"` at the top of this file.'),
+			suggest('To fix this, put `import Roact from "@rbxts/roact"` at the top of this file.'),
 			node,
 			CompilerErrorType.RoactJsxWithoutImport,
 		);
 	}
 
 	const tagNameNode = node.getTagNameNode();
-	const isArrayExpressionParent = node.getParentIfKind(ts.ts.SyntaxKind.ArrayLiteralExpression);
+	const isArrayExpressionParent = node.getParentIfKind(ts.SyntaxKind.ArrayLiteralExpression);
 
 	if (isArrayExpressionParent) {
 		state.roactElementStack.push("ArrayExpression");

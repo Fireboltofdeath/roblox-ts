@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import {
 	checkMethodReserved,
 	checkReserved,
@@ -21,6 +21,7 @@ import {
 	superExpressionClassInheritsFromArray,
 	superExpressionClassInheritsFromSetOrMap,
 } from "../utility/type";
+import { getKindName, getName } from "../utility/ast";
 
 const LUA_RESERVED_METAMETHODS = [
 	"__index",
@@ -44,7 +45,7 @@ const LUA_RESERVED_METAMETHODS = [
 ];
 
 function nonGetterOrSetter(prop: ts.ClassInstancePropertyTypes) {
-	if (ts.TypeGuards.isGetAccessorDeclaration(prop) || ts.TypeGuards.isSetAccessorDeclaration(prop)) {
+	if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
 		throw new CompilerError(
 			"Getters and Setters are disallowed! See https://github.com/roblox-ts/roblox-ts/issues/457",
 			prop,
@@ -60,40 +61,40 @@ function compileClassProperty(
 	name: string,
 	precedingStatementContext: Array<string>,
 ) {
-	const propNameNode = prop.getNameNode();
+	const propNameNode = prop.name;
 
 	if (propNameNode) {
 		let propStr: string;
-		if (ts.TypeGuards.isIdentifier(propNameNode)) {
+		if (ts.isIdentifier(propNameNode)) {
 			const propName = propNameNode.getText();
 			propStr = safeLuaIndex(" ", propName);
 			checkMethodReserved(propName, prop);
-		} else if (ts.TypeGuards.isStringLiteral(propNameNode)) {
+		} else if (ts.isStringLiteral(propNameNode)) {
 			const expStr = compileExpression(state, propNameNode);
 			checkMethodReserved(propNameNode.getLiteralText(), prop);
 			propStr = `[${expStr}]`;
-		} else if (ts.TypeGuards.isNumericLiteral(propNameNode)) {
+		} else if (ts.isNumericLiteral(propNameNode)) {
 			const expStr = compileExpression(state, propNameNode);
 			propStr = `[${expStr}]`;
-		} else if (ts.TypeGuards.isComputedPropertyName(propNameNode)) {
-			const computedExp = propNameNode.getExpression();
-			if (ts.TypeGuards.isStringLiteral(computedExp)) {
+		} else if (ts.isComputedPropertyName(propNameNode)) {
+			const computedExp = propNameNode.expression;
+			if (ts.isStringLiteral(computedExp)) {
 				checkMethodReserved(computedExp.getLiteralText(), prop);
 			}
 			const computedExpStr = compileExpression(state, computedExp);
 			propStr = `[${computedExpStr}]`;
 		} else {
 			throw new CompilerError(
-				`Unexpected prop type ${prop.getKindName()} in compileClass`,
+				`Unexpected prop type ${getKindName(prop)} in compileClass`,
 				prop,
 				CompilerErrorType.UnexpectedPropType,
 				true,
 			);
 		}
 
-		if (ts.TypeGuards.isInitializerExpressionableNode(prop) && prop.hasInitializer()) {
+		if (ts.isInitializerExpressionableNode(prop) && prop.initializer !== undefined) {
 			state.enterPrecedingStatementContext(precedingStatementContext);
-			const initializer = skipNodesDownwards(prop.getInitializer()!);
+			const initializer = skipNodesDownwards(prop.initializer!);
 			state.declarationContext.set(initializer, {
 				isIdentifier: false,
 				set: `${name}${propStr}`,
@@ -125,8 +126,8 @@ function getClassMethod(
 	} else {
 		const extendsClass = classDec.getExtends();
 		if (extendsClass) {
-			const exp = extendsClass.getExpression();
-			if (exp && ts.TypeGuards.isClassExpression(exp)) {
+			const exp = extendsClass.expression;
+			if (exp && ts.isClassExpression(exp)) {
 				const baseMethod = getClassMethod(exp, methodName, getter);
 				if (baseMethod) {
 					return baseMethod;
@@ -146,7 +147,7 @@ function getClassInstanceMethod(classDec: ts.ClassDeclaration | ts.ClassExpressi
 }
 
 function checkMethodCollision(node: ts.ClassDeclaration | ts.ClassExpression, method: ts.MethodDeclaration) {
-	const methodName = method.getName();
+	const methodName = getName(method);
 	if (method.isStatic()) {
 		if (getClassInstanceMethod(node, methodName)) {
 			throw new CompilerError(
@@ -187,8 +188,8 @@ function getClassProperty(
 	} else {
 		const extendsClass = classDec.getExtends();
 		if (extendsClass) {
-			const exp = extendsClass.getExpression();
-			if (exp && ts.TypeGuards.isClassExpression(exp)) {
+			const exp = extendsClass.expression;
+			if (exp && ts.isClassExpression(exp)) {
 				const baseProp = getClassProperty(exp, propName, getter);
 				if (baseProp) {
 					return baseProp;
@@ -211,8 +212,8 @@ export function checkPropertyCollision(
 	node: ts.ClassDeclaration | ts.ClassExpression,
 	prop: ts.ClassInstancePropertyTypes,
 ) {
-	const propName = prop.getName();
-	if (!ts.TypeGuards.isParameterDeclaration(prop) && prop.isStatic()) {
+	const propName = getName(prop);
+	if (!ts.isParameterDeclaration(prop) && prop.isStatic()) {
 		if (getClassInstanceProperty(node, propName)) {
 			throw new CompilerError(
 				`An instance property already exists with the name ${propName}`,
@@ -254,7 +255,7 @@ function getConstructor(node: ts.ClassDeclaration | ts.ClassExpression) {
 function checkDefaultIterator<
 	T extends ts.PropertyDeclaration | ts.ParameterDeclaration | ts.MethodDeclaration | ts.ClassStaticPropertyTypes
 >(extendsArray: boolean, prop: T) {
-	if (extendsArray && prop.getName() === "[Symbol.iterator]") {
+	if (extendsArray && getName(prop) === "[Symbol.iterator]") {
 		// This check is sufficient because TS only considers something as having an iterator when it is
 		// literally `Symbol.iterator`. At present, writing Symbol or Symbol.iterator to another variable
 		// is not considered valid by TS
@@ -273,18 +274,18 @@ function validateMethod(
 	isRoact: boolean,
 ) {
 	if (isRoact) {
-		checkRoactReserved(node.getName() || "", method.getName(), node);
+		checkRoactReserved(getName(node) || "", getName(method), node);
 	}
 	checkDecorators(method);
 	checkMethodCollision(node, method);
 	checkDefaultIterator(extendsArray, method);
-	const nameNode = method.getNameNode();
-	if (ts.TypeGuards.isComputedPropertyName(nameNode)) {
+	const nameNode = method.name;
+	if (ts.isComputedPropertyName(nameNode)) {
 		let isSymbolPropAccess = false;
-		const exp = skipNodesDownwards(nameNode.getExpression());
-		if (ts.TypeGuards.isPropertyAccessExpression(exp)) {
-			const subExp = skipNodesDownwards(exp.getExpression());
-			if (ts.TypeGuards.isIdentifier(subExp) && subExp.getText() === "Symbol") {
+		const exp = skipNodesDownwards(nameNode.expression);
+		if (ts.isPropertyAccessExpression(exp)) {
+			const subExp = skipNodesDownwards(exp.expression);
+			if (ts.isIdentifier(subExp) && subExp.getText() === "Symbol") {
 				isSymbolPropAccess = true;
 			}
 		}
@@ -305,7 +306,7 @@ function compileClassInitializer(
 	results: Array<string>,
 	name: string,
 ) {
-	const prefix = ts.TypeGuards.isClassExpression(node) && node.getNameNode() ? "local " : "";
+	const prefix = ts.isClassExpression(node) && node.name ? "local " : "";
 	results.push(state.indent + `${prefix}${name} = setmetatable({}, {\n`);
 	state.pushIndent();
 	if (node.getExtends()) {
@@ -324,18 +325,18 @@ function compileRoactClassInitializer(
 	name: string,
 	roactType: string,
 ) {
-	const prefix = ts.TypeGuards.isClassExpression(node) && node.getNameNode() ? "local " : "";
+	const prefix = ts.isClassExpression(node) && node.name ? "local " : "";
 	results.push(state.indent + `${prefix}${name} = ${roactType}:extend("${name}");\n`);
 }
 
 function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.ClassExpression) {
-	const nameNode = node.getNameNode();
+	const nameNode = node.name;
 	const name = nameNode ? checkReserved(nameNode) : state.getNewId();
 	let expAlias: string | undefined;
 
 	checkDecorators(node);
 
-	if (ts.TypeGuards.isClassDeclaration(node)) {
+	if (ts.isClassDeclaration(node)) {
 		state.pushExport(name, node);
 	}
 
@@ -346,7 +347,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 	if (!isRoact && inheritsFromRoactComponent(node)) {
 		throw new CompilerError(
 			`Cannot inherit ${bold(node.getExtendsOrThrow().getText())}, must inherit ${bold("Roact.Component")}\n` +
-				ROACT_DERIVED_CLASSES_ERROR,
+			ROACT_DERIVED_CLASSES_ERROR,
 			node,
 			CompilerErrorType.RoactSubClassesNotSupported,
 		);
@@ -355,7 +356,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 	let hasSuper = false;
 	const results = new Array<string>();
 
-	const isExpression = ts.TypeGuards.isClassExpression(node);
+	const isExpression = ts.isClassExpression(node);
 
 	if (isExpression) {
 		results.push(state.indent + `local ${nameNode ? (expAlias = state.getNewId()) : name};\n`);
@@ -373,7 +374,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 
 	const extendExp = node.getExtends();
 	if (!isRoact && extendExp) {
-		const extendExpExp = skipNodesDownwards(extendExp.getExpression());
+		const extendExpExp = skipNodesDownwards(extendExp.expression);
 		extendsArray = superExpressionClassInheritsFromArray(extendExpExp);
 		hasSuper = !superExpressionClassInheritsFromArray(extendExpExp, false);
 
@@ -389,7 +390,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 		if (hasSuper) {
 			results.push(
 				state.indent +
-					`local super = ${compileExpression(state, skipNodesDownwards(extendExp.getExpression()))};\n`,
+				`local super = ${compileExpression(state, skipNodesDownwards(extendExp.expression))};\n`,
 			);
 		}
 		state.exitPrecedingStatementContext();
@@ -421,10 +422,10 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 		prop = nonGetterOrSetter(prop);
 
 		if (isRoact) {
-			checkRoactReserved(name, prop.getName(), node);
+			checkRoactReserved(name, getName(prop), node);
 		}
 
-		if ((prop.getParent() as ts.ClassDeclaration | ts.ClassExpression) === node) {
+		if ((prop.parent as ts.ClassDeclaration | ts.ClassExpression) === node) {
 			compileClassProperty(state, prop, "self", extraInitializers);
 		}
 	}
@@ -445,7 +446,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 
 	for (const method of staticMethods) {
 		if (method.getBody() !== undefined) {
-			const methodName = method.getName();
+			const methodName = getName(method);
 
 			if (methodName === "new" || methodName === "toString") {
 				throw new CompilerError(
@@ -467,7 +468,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 
 	for (const method of instanceMethods) {
 		if (method.getBody() !== undefined) {
-			const methodName = method.getName();
+			const methodName = getName(method);
 
 			if (methodName === "new") {
 				throw new CompilerError(
@@ -498,7 +499,7 @@ function compileClass(state: CompilerState, node: ts.ClassDeclaration | ts.Class
 		checkPropertyCollision(node, prop);
 		checkDefaultIterator(extendsArray, prop);
 		if (isRoact) {
-			checkRoactReserved(name, prop.getName(), node);
+			checkRoactReserved(name, getName(prop), node);
 		}
 		compileClassProperty(state, nonGetterOrSetter(prop), name, results);
 	}

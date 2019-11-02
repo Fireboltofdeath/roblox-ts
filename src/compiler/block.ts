@@ -1,13 +1,14 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileStatementedNode } from ".";
 import { CompilerState } from "../CompilerState";
+import { getParentIfKind } from "../utility/ast";
 
 export function compileBlock(state: CompilerState, node: ts.Block) {
-	if (node.getStatements().length === 0) {
+	if (node.statements.length === 0) {
 		return "";
 	}
 	let result = "";
-	const parent = node.getParentIfKind(ts.SyntaxKind.SourceFile) || node.getParentIfKind(ts.SyntaxKind.Block);
+	const parent = getParentIfKind(node, ts.SyntaxKind.SourceFile) || getParentIfKind(node, ts.SyntaxKind.Block);
 	if (parent) {
 		result += state.indent + "do\n";
 		state.pushIndent();

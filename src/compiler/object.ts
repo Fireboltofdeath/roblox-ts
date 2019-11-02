@@ -1,8 +1,9 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, compileMethodDeclaration } from ".";
 import { CompilerState } from "../CompilerState";
 import { CompilerError, CompilerErrorType } from "../errors/CompilerError";
 import { joinIndentedLines, safeLuaIndex, skipNodesDownwards } from "../utility/general";
+import { getKindName } from "../utility/ast";
 
 function assignMembers(state: CompilerState, from: string, target: string) {
 	state.pushIdStack();
@@ -14,7 +15,7 @@ function assignMembers(state: CompilerState, from: string, target: string) {
 }
 
 export function compileObjectLiteralExpression(state: CompilerState, node: ts.ObjectLiteralExpression) {
-	const properties = node.getProperties();
+	const properties = node.properties;
 
 	if (properties.length === 0) {
 		return "{}";
@@ -28,36 +29,36 @@ export function compileObjectLiteralExpression(state: CompilerState, node: ts.Ob
 	for (const prop of properties) {
 		const context = state.enterPrecedingStatementContext();
 
-		if (ts.TypeGuards.isPropertyAssignment(prop) || ts.TypeGuards.isShorthandPropertyAssignment(prop)) {
+		if (ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop)) {
 			let lhs: ts.Expression;
 			let n = 0;
 			let child = prop.getChildAtIndex(n);
 
-			while (ts.TypeGuards.isJSDoc(child)) {
+			while (ts.isJSDoc(child)) {
 				child = prop.getChildAtIndex(++n);
 			}
 
 			child = skipNodesDownwards(child);
 
-			if (ts.TypeGuards.isComputedPropertyName(child)) {
-				lhs = skipNodesDownwards(child.getExpression());
+			if (ts.isComputedPropertyName(child)) {
+				lhs = skipNodesDownwards(child.expression);
 			} else if (
-				ts.TypeGuards.isIdentifier(child) ||
-				ts.TypeGuards.isStringLiteral(child) ||
-				ts.TypeGuards.isNumericLiteral(child)
+				ts.isIdentifier(child) ||
+				ts.isStringLiteral(child) ||
+				ts.isNumericLiteral(child)
 			) {
 				lhs = child;
 			} else {
 				throw new CompilerError(
-					`Unexpected type of object index! (${child.getKindName()})`,
+					`Unexpected type of object index! (${getKindName(child)})`,
 					child,
 					CompilerErrorType.UnexpectedObjectIndex,
 				);
 			}
 
 			let rhs: ts.Expression; // You may want to move this around
-			if (ts.TypeGuards.isShorthandPropertyAssignment(prop) && ts.TypeGuards.isIdentifier(child)) {
-				lhs = prop.getNameNode();
+			if (ts.isShorthandPropertyAssignment(prop) && ts.isIdentifier(child)) {
+				lhs = prop.name;
 				rhs = child;
 			} else {
 				rhs = skipNodesDownwards(prop.getInitializerOrThrow());
@@ -69,7 +70,7 @@ export function compileObjectLiteralExpression(state: CompilerState, node: ts.Ob
 			const rhsContext = state.exitPrecedingStatementContext();
 
 			if (rhsContext.length > 0) {
-				if (!ts.TypeGuards.isIdentifier(child) && !context.isPushed) {
+				if (!ts.isIdentifier(child) && !context.isPushed) {
 					lhsStr = state.pushPrecedingStatementToNewId(lhs, lhsStr);
 				}
 				context.push(...rhsContext);
@@ -77,15 +78,15 @@ export function compileObjectLiteralExpression(state: CompilerState, node: ts.Ob
 			}
 
 			line = `${
-				ts.TypeGuards.isIdentifier(child) ? safeLuaIndex("", lhs.getText()) : `[${lhsStr}]`
-			} = ${rhsStr};\n`;
-		} else if (ts.TypeGuards.isMethodDeclaration(prop)) {
+				ts.isIdentifier(child) ? safeLuaIndex("", lhs.getText()) : `[${lhsStr}]`
+				} = ${rhsStr};\n`;
+		} else if (ts.isMethodDeclaration(prop)) {
 			line = "";
-		} else if (ts.TypeGuards.isSpreadAssignment(prop)) {
-			line = compileExpression(state, skipNodesDownwards(prop.getExpression()));
+		} else if (ts.isSpreadAssignment(prop)) {
+			line = compileExpression(state, skipNodesDownwards(prop.expression));
 		} else {
 			throw new CompilerError(
-				`Unexpected property type in object! Got ${prop.getKindName()}`,
+				`Unexpected property type in object! Got ${getKindName(prop)}`,
 				prop,
 				CompilerErrorType.BadObjectPropertyType,
 				true,
@@ -97,16 +98,16 @@ export function compileObjectLiteralExpression(state: CompilerState, node: ts.Ob
 		if (
 			hasContext ||
 			context.length > 0 ||
-			ts.TypeGuards.isSpreadAssignment(prop) ||
-			ts.TypeGuards.isMethodDeclaration(prop)
+			ts.isSpreadAssignment(prop) ||
+			ts.isMethodDeclaration(prop)
 		) {
 			if (!hasContext) {
 				id = state.pushToDeclarationOrNewId(node, "{}", declaration => declaration.isIdentifier);
 			}
 
-			if (ts.TypeGuards.isSpreadAssignment(prop)) {
+			if (ts.isSpreadAssignment(prop)) {
 				line = assignMembers(state, line, id);
-			} else if (ts.TypeGuards.isMethodDeclaration(prop)) {
+			} else if (ts.isMethodDeclaration(prop)) {
 				line = state.indent + compileMethodDeclaration(state, prop, id).trimLeft();
 			} else {
 				line = state.indent + id + (line.startsWith("[") ? "" : ".") + line;

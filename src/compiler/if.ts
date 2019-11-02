@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileStatement, compileTruthyCheck } from ".";
 import { CompilerState } from "../CompilerState";
 import { joinIndentedLines, removeBalancedParenthesisFromStringBorders, skipNodesDownwards } from "../utility/general";
@@ -6,7 +6,7 @@ import { joinIndentedLines, removeBalancedParenthesisFromStringBorders, skipNode
 export function compileIfStatement(state: CompilerState, node: ts.IfStatement) {
 	state.enterPrecedingStatementContext();
 	const expStr = removeBalancedParenthesisFromStringBorders(
-		compileTruthyCheck(state, skipNodesDownwards(node.getExpression())),
+		compileTruthyCheck(state, skipNodesDownwards(node.expression)),
 	);
 	const lines = state.exitPrecedingStatementContext();
 	lines.push(state.indent + `if ${expStr} then\n`);
@@ -16,11 +16,11 @@ export function compileIfStatement(state: CompilerState, node: ts.IfStatement) {
 	let elseStatement = node.getElseStatement();
 	let numBlocks = 1;
 
-	while (elseStatement && ts.TypeGuards.isIfStatement(elseStatement)) {
+	while (elseStatement && ts.isIfStatement(elseStatement)) {
 		state.enterPrecedingStatementContext();
 		state.pushIndent();
 		const elseIfExpression = removeBalancedParenthesisFromStringBorders(
-			compileTruthyCheck(state, skipNodesDownwards(elseStatement.getExpression())),
+			compileTruthyCheck(state, skipNodesDownwards(elseStatement.expression)),
 		);
 		const context = state.exitPrecedingStatementContext();
 

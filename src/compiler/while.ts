@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileLoopBody, compileTruthyCheck } from ".";
 import { CompilerState } from "../CompilerState";
 import { joinIndentedLines, removeBalancedParenthesisFromStringBorders, skipNodesDownwards } from "../utility/general";
@@ -7,7 +7,7 @@ export function compileWhileStatement(state: CompilerState, node: ts.WhileStatem
 	state.pushIdStack();
 	state.enterPrecedingStatementContext();
 	const expStr = removeBalancedParenthesisFromStringBorders(
-		compileTruthyCheck(state, skipNodesDownwards(node.getExpression())),
+		compileTruthyCheck(state, skipNodesDownwards(node.expression)),
 	);
 	let result = "";
 	const context = state.exitPrecedingStatementContext();
@@ -24,7 +24,7 @@ export function compileWhileStatement(state: CompilerState, node: ts.WhileStatem
 		result += state.indent + `if not (${expStr}) then break; end;\n`;
 	}
 
-	result += compileLoopBody(state, node.getStatement());
+	result += compileLoopBody(state, node.statement);
 	state.popIndent();
 
 	result += state.indent + `end;\n`;

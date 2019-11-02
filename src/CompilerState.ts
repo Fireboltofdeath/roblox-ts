@@ -1,9 +1,10 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { ProjectType } from ".";
 import { RoactElementType } from "./compiler";
 import { CompilerError, CompilerErrorType } from "./errors/CompilerError";
 import { RojoProject } from "./RojoProject";
 import { joinIndentedLines, removeBalancedParenthesisFromStringBorders, ScriptContext } from "./utility/general";
+import { getKindName, getAncestors, getFirstAncestorByKind } from "./utility/ast";
 
 export type PrecedingStatementContext = Array<string> & { isPushed: boolean };
 
@@ -25,7 +26,7 @@ export class CompilerState {
 		public readonly rojoProject?: RojoProject,
 		public readonly runtimeOverride?: string,
 		public readonly logTruthyDifferences?: boolean,
-	) {}
+	) { }
 	public declarationContext = new Map<ts.Node, DeclarationContext>();
 	public alreadyCheckedTruthyConditionals = new Array<ts.Node>();
 
@@ -47,9 +48,9 @@ export class CompilerState {
 
 			context.push(
 				this.indent +
-					`${declaration.needsLocalizing ? "local " : ""}${id}${
-						expStr ? ` ${isReturn ? "" : "= "}${expStr}` : ""
-					};\n`,
+				`${declaration.needsLocalizing ? "local " : ""}${id}${
+				expStr ? ` ${isReturn ? "" : "= "}${expStr}` : ""
+				};\n`,
 			);
 
 			context.isPushed = declaration.isIdentifier;
@@ -69,11 +70,10 @@ export class CompilerState {
 			| undefined;
 
 		if (!currentContext) {
-			const kind = node.getKindName();
-			const ancestorName = node
-				.getAncestors()
-				.find(ancestor => ts.TypeGuards.isStatement(ancestor) || ts.TypeGuards.isStatementedNode(ancestor))!
-				.getKindName();
+			const kind = getKindName(node);
+			const ancestorName = getKindName(getAncestors(node)
+				.find(ancestor => ts.isStatement(ancestor) || ts.isStatementedNode(ancestor))!
+			);
 			throw new CompilerError(
 				`roblox-ts does not support using a ${kind} which requires preceding statements in a ${ancestorName}.`,
 				node,
@@ -188,7 +188,7 @@ export class CompilerState {
 	public exportStack = new Array<Set<string>>();
 
 	public pushExport(name: string, node: ts.Node) {
-		if (!ts.TypeGuards.isExportGetableNode(node) || !node.hasExportKeyword()) {
+		if (!ts.isExportGetableNode(node) || !node.hasExportKeyword()) {
 			return;
 		}
 
@@ -197,11 +197,11 @@ export class CompilerState {
 		this.exportStack[this.exportStack.length - 1].add(`${ancestorName}.${alias} = ${name};\n`);
 	}
 
-	public getNameForContext(myNamespace: ts.NamespaceDeclaration | undefined): string {
+	public getNameForContext(myNamespace: ts.ModuleDeclaration | undefined): string {
 		let name;
 
 		if (myNamespace) {
-			name = myNamespace.getName();
+			name = getName(myNamespace);
 			name = this.namespaceStack.get(name) || name;
 		} else {
 			name = "exports";
@@ -212,7 +212,7 @@ export class CompilerState {
 	}
 
 	public getExportContextName(node: ts.VariableStatement | ts.Node): string {
-		return this.getNameForContext(node.getFirstAncestorByKind(ts.SyntaxKind.ModuleDeclaration));
+		return this.getNameForContext(getFirstAncestorByKind(node, ts.SyntaxKind.ModuleDeclaration));
 	}
 
 	// in the form: { ORIGINAL_IDENTIFIER = REPLACEMENT_VALUE }

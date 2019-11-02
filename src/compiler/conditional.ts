@@ -1,4 +1,4 @@
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { compileExpression, compileTruthyCheck } from ".";
 import { CompilerState, DeclarationContext } from "../CompilerState";
 import {
@@ -42,9 +42,9 @@ export function compileConditionalExpression(state: CompilerState, node: ts.Cond
 		state.alreadyCheckedTruthyConditionals.push(skipNodesUpwardsLookAhead(node));
 	}
 
-	const condition = skipNodesDownwards(node.getCondition());
-	const whenTrue = skipNodesDownwards(node.getWhenTrue());
-	const whenFalse = skipNodesDownwards(node.getWhenFalse());
+	const condition = skipNodesDownwards(node.condition);
+	const whenTrue = skipNodesDownwards(node.whenTrue);
+	const whenFalse = skipNodesDownwards(node.whenFalse);
 	let isPushed = false;
 	let conditionStr: string;
 

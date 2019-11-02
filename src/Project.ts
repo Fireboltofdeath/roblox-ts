@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import klaw from "klaw";
 import { minify } from "luamin";
 import path from "path";
-import * as ts from "ts-morph";
+import ts from "typescript";
 import { addEvent } from "./analytics";
 import { compileSourceFile } from "./compiler";
 import { CompilerState } from "./CompilerState";
@@ -195,7 +195,7 @@ export class Project {
 		if (fs.pathExistsSync(pkgJsonPath)) {
 			try {
 				this.pkgVersion = JSON.parse(fs.readFileSync(pkgJsonPath).toString()).version || DEFAULT_PKG_VERSION;
-			} catch (e) {}
+			} catch (e) { }
 		}
 
 		const modulesPath = this.getModulesPath(this.projectPath);
@@ -333,14 +333,14 @@ export class Project {
 					declaration: false,
 					downlevelIteration: true,
 					isolatedModules: true,
-					jsx: ts.ts.JsxEmit.React,
+					jsx: ts.JsxEmit.React,
 					jsxFactory: "Roact.createElement",
-					module: ts.ts.ModuleKind.CommonJS,
+					module: ts.ModuleKind.CommonJS,
 					noLib: true,
 					outDir: "out",
 					rootDir: ".",
 					strict: true,
-					target: ts.ts.ScriptTarget.ES2015,
+					target: ts.ScriptTarget.ES2015,
 					typeRoots: ["node_modules/@rbxts"],
 				},
 				useVirtualFileSystem: true,
@@ -368,7 +368,7 @@ export class Project {
 		if (opts.downlevelIteration !== true) {
 			errors.push(`${yellow(`"downlevelIteration"`)} must be ${yellow(`true`)}`);
 		}
-		if (opts.module !== ts.ts.ModuleKind.CommonJS) {
+		if (opts.module !== ts.ModuleKind.CommonJS) {
 			errors.push(`${yellow(`"module"`)} must be ${yellow(`"commonjs"`)}`);
 		}
 		if (opts.noLib !== true) {
@@ -377,7 +377,7 @@ export class Project {
 		if (opts.strict !== true) {
 			errors.push(`${yellow(`"strict"`)} must be ${yellow(`true`)}`);
 		}
-		if (opts.target !== ts.ts.ScriptTarget.ES2015) {
+		if (opts.target !== ts.ScriptTarget.ES2015) {
 			errors.push(`${yellow(`"target"`)} must be ${yellow(`"es6"`)}`);
 		}
 		if (opts.allowSyntheticDefaultImports !== true) {
@@ -411,7 +411,7 @@ export class Project {
 		}
 
 		// roact compiler options
-		if (opts.jsx !== undefined && opts.jsx !== ts.ts.JsxEmit.React) {
+		if (opts.jsx !== undefined && opts.jsx !== ts.JsxEmit.React) {
 			errors.push(`${yellow(`"jsx"`)} must be ${yellow(`"react"`)} or not defined`);
 		}
 		if (opts.jsxFactory !== undefined && opts.jsxFactory !== "Roact.createElement") {
@@ -422,9 +422,9 @@ export class Project {
 		if (errors.length > 0) {
 			throw new ProjectError(
 				`Invalid "tsconfig.json" configuration!\n` +
-					"https://roblox-ts.github.io/docs/quick-start#project-folder-setup" +
-					"\n- " +
-					errors.join("\n- "),
+				"https://roblox-ts.github.io/docs/quick-start#project-folder-setup" +
+				"\n- " +
+				errors.join("\n- "),
 				ProjectErrorType.BadTsConfig,
 			);
 		}
@@ -446,9 +446,9 @@ export class Project {
 							} else {
 								throw new ProjectError(
 									`@rbxts/types is out of date!\n` +
-										yellow(`Installed version: 1.0.${patchNumber}\n`) +
-										yellow(`Minimum required version: 1.0.${MINIMUM_RBX_TYPES_VERSION}\n`) +
-										`Run 'npm i @rbxts/types' to fix this.`,
+									yellow(`Installed version: 1.0.${patchNumber}\n`) +
+									yellow(`Minimum required version: 1.0.${MINIMUM_RBX_TYPES_VERSION}\n`) +
+									`Run 'npm i @rbxts/types' to fix this.`,
 									ProjectErrorType.BadRbxTypes,
 								);
 							}
