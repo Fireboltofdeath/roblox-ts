@@ -108,27 +108,31 @@ export function compileFiles(
 		createTransformerList({ program }, data.transformers, data.projectPath),
 	);
 
-	const transformedSourceFiles = ts.transformNodes(
-		undefined,
-		undefined,
-		ts.factory,
-		compilerOptions,
-		sourceFiles,
-		transformers,
-		false,
-	);
+	let proxyProgram = program;
 
-	const sourceFileMap = new Map<string, { original: ts.SourceFile; transformed: ts.SourceFile; cache?: string }>(
-		sourceFiles.map((x, i) => [
-			x.fileName,
-			{ original: x, transformed: transformedSourceFiles.transformed[i] as ts.SourceFile },
-		]),
-	);
+	if (transformers.length > 0) {
+		const transformedSourceFiles = ts.transformNodes(
+			undefined,
+			undefined,
+			ts.factory,
+			compilerOptions,
+			sourceFiles,
+			transformers,
+			false,
+		);
 
-	const proxyProgram = createProjectProgram(
-		data,
-		createTransformedCompilerHost(program.getCompilerOptions(), sourceFileMap),
-	).getProgram();
+		const sourceFileMap = new Map<string, { original: ts.SourceFile; transformed: ts.SourceFile; cache?: string }>(
+			sourceFiles.map((x, i) => [
+				x.fileName,
+				{ original: x, transformed: transformedSourceFiles.transformed[i] as ts.SourceFile },
+			]),
+		);
+
+		proxyProgram = createProjectProgram(
+			data,
+			createTransformedCompilerHost(program.getCompilerOptions(), sourceFileMap),
+		).getProgram();
+	}
 
 	for (let i = 0; i < sourceFiles.length; i++) {
 		const sourceFile = proxyProgram.getSourceFile(sourceFiles[i].fileName)!;
