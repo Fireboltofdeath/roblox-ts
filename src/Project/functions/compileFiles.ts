@@ -1,4 +1,4 @@
-import ts from "byots";
+import ts, { createPrinter } from "byots";
 import fs from "fs-extra";
 import { renderAST } from "LuauRenderer";
 import path from "path";
@@ -111,7 +111,7 @@ export function compileFiles(
 	const transformedSourceFiles = ts.transformNodes(
 		undefined,
 		undefined,
-		ts.createNodeFactory(ts.NodeFactoryFlags.None, ts.createBaseNodeFactory()),
+		ts.factory,
 		compilerOptions,
 		sourceFiles,
 		transformers,
@@ -132,11 +132,12 @@ export function compileFiles(
 
 	for (let i = 0; i < sourceFiles.length; i++) {
 		const sourceFile = proxyProgram.getSourceFile(sourceFiles[i].fileName)!;
+		const originalSourceFile = program.getSourceFile(sourceFiles[i].fileName)!;
 		const progress = `${i + 1}/${sourceFiles.length}`.padStart(progressMaxLength);
 		benchmarkIfVerbose(`${progress} compile ${path.relative(process.cwd(), sourceFile.fileName)}`, () => {
-			diagnostics.push(...getCustomPreEmitDiagnostics(sourceFile));
+			diagnostics.push(...getCustomPreEmitDiagnostics(originalSourceFile));
 			if (hasErrors(diagnostics)) return;
-			diagnostics.push(...ts.getPreEmitDiagnostics(proxyProgram, sourceFile));
+			diagnostics.push(...ts.getPreEmitDiagnostics(program, originalSourceFile));
 			if (hasErrors(diagnostics)) return;
 
 			const transformState = new TransformState(
