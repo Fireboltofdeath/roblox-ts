@@ -1,11 +1,4 @@
-import ts, {
-	disposeEmitNodes,
-	getParseTreeNode,
-	getSourceFileOfNode,
-	getTransformers,
-	TransformationContext,
-	transformNodes,
-} from "byots";
+import ts from "byots";
 import fs from "fs-extra";
 import { renderAST } from "LuauRenderer";
 import path from "path";
@@ -115,8 +108,8 @@ export function compileFiles(
 		createTransformerList({ program }, data.transformers, data.projectPath),
 	);
 
-	const transformedSourceFiles = transformNodes(
-		typeChecker.getEmitResolver(),
+	const transformedSourceFiles = ts.transformNodes(
+		undefined,
 		undefined,
 		ts.createNodeFactory(ts.NodeFactoryFlags.None, ts.createBaseNodeFactory()),
 		compilerOptions,
@@ -125,14 +118,12 @@ export function compileFiles(
 		false,
 	);
 
-	const sourceFileMap = new Map<string, { original: ts.SourceFile; transformed: ts.SourceFile; cache?: string }>();
-	sourceFiles.forEach((x, i) => {
-		sourceFileMap.set(sourceFiles[i].fileName, {
-			original: x,
-			transformed: transformedSourceFiles.transformed[i] as ts.SourceFile,
-		});
-	});
-	Error.stackTraceLimit = Infinity;
+	const sourceFileMap = new Map<string, { original: ts.SourceFile; transformed: ts.SourceFile; cache?: string }>(
+		sourceFiles.map((x, i) => [
+			x.fileName,
+			{ original: x, transformed: transformedSourceFiles.transformed[i] as ts.SourceFile },
+		]),
+	);
 
 	const proxyProgram = createProjectProgram(
 		data,
