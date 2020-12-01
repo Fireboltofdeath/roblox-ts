@@ -19,7 +19,7 @@ export function validateNotAnyType(state: TransformState, node: ts.Node) {
 		}
 	}
 
-	if (isDefinitelyType(type, t => isAnyType(t)) && !ts.isParseTreeNode(node)) {
+	if (isDefinitelyType(type, t => isAnyType(t))) {
 		state.addDiagnostic(errors.noAny(node));
 	}
 }
