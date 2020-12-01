@@ -1,4 +1,4 @@
-import ts, { createPrinter } from "byots";
+import ts from "byots";
 import fs from "fs-extra";
 import { renderAST } from "LuauRenderer";
 import path from "path";
