@@ -1,7 +1,7 @@
 import ts from "byots";
 import fs from "fs-extra";
 import path from "path";
-import { ProjectData, ProjectFlags, ProjectOptions } from "Project/types";
+import { ProjectData, ProjectFlags, ProjectOptions, TransformerPluginConfig } from "Project/types";
 import { RojoResolver } from "Shared/classes/RojoResolver";
 import { NODE_MODULES, RBXTS_SCOPE } from "Shared/constants";
 import { ProjectError } from "Shared/errors/ProjectError";
@@ -68,6 +68,21 @@ export function createProjectData(
 		rojoConfigPath = RojoResolver.findRojoConfigFilePath(projectPath);
 	}
 
+	const transformers: Array<TransformerPluginConfig> = [];
+	try {
+		const projectConfigContents = ts.readConfigFile(tsConfigPath, ts.sys.readFile);
+		if (projectConfigContents.error) throw new ProjectError(projectConfigContents.error.messageText.toString());
+		const projectConfig = projectConfigContents.config;
+		const plugins = projectConfig.compilerOptions.plugins;
+		if (plugins && Array.isArray(plugins)) {
+			for (const x of plugins) {
+				if (x.transform && typeof x.transform === "string") {
+					transformers.push(x);
+				}
+			}
+		}
+	} catch (e) {}
+
 	const writeOnlyChanged = flags.writeOnlyChanged;
 
 	return {
@@ -84,5 +99,6 @@ export function createProjectData(
 		projectPath,
 		rojoConfigPath,
 		writeOnlyChanged,
+		transformers,
 	};
 }

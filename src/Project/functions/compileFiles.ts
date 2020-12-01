@@ -1,7 +1,17 @@
-import ts from "byots";
+import ts, {
+	disposeEmitNodes,
+	getParseTreeNode,
+	getSourceFileOfNode,
+	getTransformers,
+	TransformationContext,
+	transformNodes,
+} from "byots";
 import fs from "fs-extra";
 import { renderAST } from "LuauRenderer";
 import path from "path";
+import { createProjectProgram } from "Project/functions/createProjectProgram";
+import { createTransformedCompilerHost } from "Project/functions/createTransformedCompilerHost";
+import { createTransformerList, flattenIntoTransformers } from "Project/functions/createTransformerList";
 import { transformPaths } from "Project/transformers/transformPaths";
 import { transformTypeReferenceDirectives } from "Project/transformers/transformTypeReferenceDirectives";
 import { ProjectData, ProjectServices } from "Project/types";
@@ -101,13 +111,41 @@ export function compileFiles(
 	const diagnostics = new Array<ts.Diagnostic>();
 	const fileWriteQueue = new Array<{ sourceFile: ts.SourceFile; source: string }>();
 	const progressMaxLength = `${sourceFiles.length}/${sourceFiles.length}`.length;
+	const transformers = flattenIntoTransformers(
+		createTransformerList({ program }, data.transformers, data.projectPath),
+	);
+
+	const transformedSourceFiles = transformNodes(
+		typeChecker.getEmitResolver(),
+		undefined,
+		ts.createNodeFactory(ts.NodeFactoryFlags.None, ts.createBaseNodeFactory()),
+		compilerOptions,
+		sourceFiles,
+		transformers,
+		false,
+	);
+
+	const sourceFileMap = new Map<string, { original: ts.SourceFile; transformed: ts.SourceFile; cache?: string }>();
+	sourceFiles.forEach((x, i) => {
+		sourceFileMap.set(sourceFiles[i].fileName, {
+			original: x,
+			transformed: transformedSourceFiles.transformed[i] as ts.SourceFile,
+		});
+	});
+	Error.stackTraceLimit = Infinity;
+
+	const proxyProgram = createProjectProgram(
+		data,
+		createTransformedCompilerHost(program.getCompilerOptions(), sourceFileMap),
+	).getProgram();
+
 	for (let i = 0; i < sourceFiles.length; i++) {
-		const sourceFile = sourceFiles[i];
+		const sourceFile = proxyProgram.getSourceFile(sourceFiles[i].fileName)!;
 		const progress = `${i + 1}/${sourceFiles.length}`.padStart(progressMaxLength);
 		benchmarkIfVerbose(`${progress} compile ${path.relative(process.cwd(), sourceFile.fileName)}`, () => {
 			diagnostics.push(...getCustomPreEmitDiagnostics(sourceFile));
 			if (hasErrors(diagnostics)) return;
-			diagnostics.push(...ts.getPreEmitDiagnostics(program, sourceFile));
+			diagnostics.push(...ts.getPreEmitDiagnostics(proxyProgram, sourceFile));
 			if (hasErrors(diagnostics)) return;
 
 			const transformState = new TransformState(

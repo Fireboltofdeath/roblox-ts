@@ -52,6 +52,7 @@ export class VirtualProject {
 			rojoConfigPath: undefined,
 			tsConfigPath: "",
 			writeOnlyChanged: false,
+			transformers: [],
 		};
 
 		this.compilerOptions = {
