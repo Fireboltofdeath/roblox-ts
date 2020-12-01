@@ -9,7 +9,6 @@ export function createTransformedCompilerHost(options: ts.CompilerOptions, mappi
 		const map = mapping.get(file);
 		if (map) {
 			if (map.original !== map.transformed) {
-				LogService.writeLine("Yay, mapped: " + file);
 				if (!map.cache) map.cache = printer.printFile(map.transformed);
 				return map.cache;
 			}
