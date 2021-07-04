@@ -21,6 +21,7 @@ import { createTextDiagnostic } from "Shared/util/createTextDiagnostic";
 import { getRootDirs } from "Shared/util/getRootDirs";
 import { MultiTransformState, transformSourceFile, TransformState } from "TSTransformer";
 import { DiagnosticService } from "TSTransformer/classes/DiagnosticService";
+import { createNodeModulesPathMapping } from "TSTransformer/util/createNodeModulesPathMapping";
 import { createTransformServices } from "TSTransformer/util/createTransformServices";
 
 function inferProjectType(data: ProjectData, rojoResolver: RojoResolver): ProjectType {
@@ -82,7 +83,8 @@ export function compileFiles(
 
 	checkRojoConfig(data, rojoResolver, getRootDirs(compilerOptions), pathTranslator);
 
-	const pkgRojoResolver = RojoResolver.synthetic(data.nodeModulesPath);
+	const pkgRojoResolvers = compilerOptions.typeRoots!.map(RojoResolver.synthetic);
+	const nodeModulesPathMapping = createNodeModulesPathMapping(data.nodeModulesPath, compilerOptions.typeRoots!);
 
 	const reverseSymlinkMap = getReverseSymlinkMap(program);
 
@@ -174,11 +176,12 @@ export function compileFiles(
 				multiTransformState,
 				compilerOptions,
 				rojoResolver,
-				pkgRojoResolver,
+				pkgRojoResolvers,
 				reverseSymlinkMap,
 				runtimeLibRbxPath,
 				typeChecker,
 				projectType,
+				nodeModulesPathMapping,
 				sourceFile,
 			);
 

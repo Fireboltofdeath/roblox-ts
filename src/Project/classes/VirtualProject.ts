@@ -1,5 +1,6 @@
 import ts from "byots";
 import { renderAST } from "LuauRenderer";
+import path from "path";
 import { PATH_SEP, pathJoin, VirtualFileSystem } from "Project/classes/VirtualFileSystem";
 import { validateCompilerOptions } from "Project/functions/validateCompilerOptions";
 import { getCustomPreEmitDiagnostics } from "Project/util/getCustomPreEmitDiagnostics";
@@ -12,6 +13,7 @@ import { ProjectData } from "Shared/types";
 import { assert } from "Shared/util/assert";
 import { MultiTransformState, transformSourceFile, TransformState } from "TSTransformer";
 import { DiagnosticService } from "TSTransformer/classes/DiagnosticService";
+import { createNodeModulesPathMapping } from "TSTransformer/util/createNodeModulesPathMapping";
 import { createTransformServices } from "TSTransformer/util/createTransformServices";
 
 const PROJECT_DIR = PATH_SEP;
@@ -26,19 +28,19 @@ export class VirtualProject {
 
 	private readonly compilerOptions: ts.CompilerOptions;
 	private readonly rojoResolver: RojoResolver;
-	private readonly pkgRojoResolver: RojoResolver;
+	private readonly pkgRojoResolvers: Array<RojoResolver>;
 	private readonly compilerHost: ts.CompilerHost;
 
 	private program: ts.Program | undefined;
 	private typeChecker: ts.TypeChecker | undefined;
+	private nodeModulesPathMapping: Map<string, string>;
 
 	constructor() {
 		this.data = {
 			includePath: "",
 			isPackage: false,
 			logTruthyChanges: false,
-			nodeModulesPath: pathJoin(PROJECT_DIR, NODE_MODULES, RBXTS_SCOPE),
-			nodeModulesPathMapping: new Map(),
+			nodeModulesPath: pathJoin(PROJECT_DIR, NODE_MODULES),
 			noInclude: false,
 			pkgVersion: "",
 			projectOptions: { includePath: "", rojo: "", type: ProjectType.Model },
@@ -57,7 +59,7 @@ export class VirtualProject {
 			target: ts.ScriptTarget.ESNext,
 			module: ts.ModuleKind.CommonJS,
 			moduleResolution: ts.ModuleResolutionKind.NodeJs,
-			typeRoots: [this.data.nodeModulesPath],
+			typeRoots: [path.join(this.data.nodeModulesPath, RBXTS_SCOPE)],
 			resolveJsonModule: true,
 			rootDir: ROOT_DIR,
 			outDir: OUT_DIR,
@@ -82,8 +84,12 @@ export class VirtualProject {
 		this.compilerHost.useCaseSensitiveFileNames = () => true;
 		this.compilerHost.getCurrentDirectory = () => PATH_SEP;
 
+		this.nodeModulesPathMapping = createNodeModulesPathMapping(
+			this.data.nodeModulesPath,
+			this.compilerOptions.typeRoots!,
+		);
 		this.rojoResolver = RojoResolver.synthetic(OUT_DIR);
-		this.pkgRojoResolver = RojoResolver.synthetic(this.data.nodeModulesPath);
+		this.pkgRojoResolvers = this.compilerOptions.typeRoots!.map(RojoResolver.synthetic);
 	}
 
 	public compileSource(source: string) {
@@ -119,11 +125,12 @@ export class VirtualProject {
 			multiTransformState,
 			this.compilerOptions,
 			this.rojoResolver,
-			this.pkgRojoResolver,
+			this.pkgRojoResolvers,
 			new Map(),
 			runtimeLibRbxPath,
 			this.typeChecker,
 			projectType,
+			this.nodeModulesPathMapping,
 			sourceFile,
 		);
 
@@ -136,6 +143,6 @@ export class VirtualProject {
 	}
 
 	public setMapping(typings: string, main: string) {
-		this.data.nodeModulesPathMapping.set(typings, main);
+		this.nodeModulesPathMapping.set(typings, main);
 	}
 }
