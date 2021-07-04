@@ -13,7 +13,6 @@ import { ProjectData } from "Shared/types";
 import { assert } from "Shared/util/assert";
 import { MultiTransformState, transformSourceFile, TransformState } from "TSTransformer";
 import { DiagnosticService } from "TSTransformer/classes/DiagnosticService";
-import { createNodeModulesPathMapping } from "TSTransformer/util/createNodeModulesPathMapping";
 import { createTransformServices } from "TSTransformer/util/createTransformServices";
 
 const PROJECT_DIR = PATH_SEP;
@@ -33,7 +32,7 @@ export class VirtualProject {
 
 	private program: ts.Program | undefined;
 	private typeChecker: ts.TypeChecker | undefined;
-	private nodeModulesPathMapping: Map<string, string>;
+	private nodeModulesPathMapping = new Map<string, string>();
 
 	constructor() {
 		this.data = {
@@ -84,10 +83,6 @@ export class VirtualProject {
 		this.compilerHost.useCaseSensitiveFileNames = () => true;
 		this.compilerHost.getCurrentDirectory = () => PATH_SEP;
 
-		this.nodeModulesPathMapping = createNodeModulesPathMapping(
-			this.data.nodeModulesPath,
-			this.compilerOptions.typeRoots!,
-		);
 		this.rojoResolver = RojoResolver.synthetic(OUT_DIR);
 		this.pkgRojoResolvers = this.compilerOptions.typeRoots!.map(RojoResolver.synthetic);
 	}
